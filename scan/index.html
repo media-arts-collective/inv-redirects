@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="b63c7c510e0122bc28e276b578be219e37f9cd9e">
+  <meta name="inventory-app-ref" content="1ad5df30c4cc02b70ba5adf72d64d53441933402">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -309,6 +309,18 @@
      with nothing selected. Targeting `[hidden]` from an author rule fixes
      it back into the author cascade, where this higher-specificity
      (0,2,0) selector correctly beats the bare `.edit-toolbar` (0,1,0). */
+  /* View mode (Browse not .editing): tiles let the page scroll. */
+  #tab-browse:not(.editing) .stack-wrap, #tab-browse:not(.editing) .shelf-slot, #tab-browse:not(.editing) .grid-cell { touch-action: auto; cursor: pointer; }
+  .edit-toggle { margin-top: 6px; font-size: 14px; padding: 0.3rem 0.6rem; }
+  #tab-browse.editing .edit-toggle { background: #900; color: #fff; }
+  .edit-toolbar { flex-wrap: wrap; border-radius: 12px; width: min(480px, calc(100vw - 2rem)); box-sizing: border-box; }
+  .edit-toolbar .details { flex-basis: 100%; font-size: 14px; max-height: 40vh; overflow-y: auto; }
+  .edit-toolbar .details a { color: cyan; }
+  .details-photo { max-width: 120px; }
+  .save-status { margin: 6px 0; padding: 0.5rem; font-size: 16px; font-weight: bold; border-radius: 4px; }
+  .save-status.saving { background: #333; color: #ff0; }
+  .save-status.ok { background: #063; color: #fff; }
+  .save-status.err { background: #900; color: #fff; }
   .edit-toolbar[hidden] {
     display: none;
   }
@@ -475,16 +487,13 @@
   <div id="reticle"><div class="r"><div class="rb"></div><div class="rc"></div></div></div>
 </div>
 
-<div id="last-seen" style="font-size:12px;min-height:16px;margin-bottom:4px;"></div>
-
-<b>Container:</b>
 <pre id="stack-display">—</pre>
 
 <input type="text" id="push-input" placeholder="type an ID and press Enter…" onkeydown="onPushKey(event)">
 <button onclick="manualClose()">Save + label</button>
 <button onclick="undoLast()">Undo</button>
 <button onclick="clearStack()">Clear</button>
-<br>
+<div id="save-status" class="save-status" hidden></div>
 <label><input type="checkbox" id="confirm-print" onchange="savePrefs()"> ask before printing</label>
 <br><br>
 
@@ -494,6 +503,7 @@
 <pre id="url-display">—</pre>
 <canvas id="qr-canvas"></canvas>
 
+<b>Log:</b>
 <pre id="log"></pre>
 
 <details style="margin-top:1rem;font-size:0.85em;color:#999;">
@@ -540,9 +550,10 @@ let btChar      = null;
 let btDevice    = null;
 let cooldown    = false;
 let anchor      = null;
-let priorState  = [];   // children from opening label scan
+let priorState  = [];   // already inside the anchor: from the sheet, or the label if the sheet is unreachable
+let priorFrom   = null; // 'sheet' | 'label'
 let session     = [];   // nodes pushed this session
-let history     = [];   // undo stack: [{anchor, priorState, session}]
+let history     = [];   // undo stack: [{anchor, priorState, priorFrom, session}]
 let lastScanId  = null; // for trivial double-scan detection
 
 // ── Prefs ─────────────────────────────────────────────────────────────────
@@ -571,18 +582,48 @@ function postToServer_(body) {
 }
 
 function commitToServer(scheme, photo) {
-  postToServer_({ type: 'scan', scheme, photo })
-    .then(res => log(res && res.ok ? 'Saved to sheet' : 'NOT saved: ' + (res && res.error)))
-    .catch(err => log('NOT saved (connection): ' + err.message));
+  return postToServer_({ type: 'scan', scheme, photo })
+    .then(res => res && res.ok ? null : (res && res.error) || 'no answer')
+    .catch(err => 'connection: ' + err.message);
 }
 
-// Every ID already in the sheet, so a typo shows up as "new" before saving.
-let knownIds = null;
-const ids_ = n => Array.isArray(n) ? (n[0] === 'T' ? [] : n.flatMap(ids_)) : [n];
-function loadKnownIds_() {
-  fetch(BASE_URL + '?scope=ids').then(r => r.json())
-    .then(ids => { knownIds = new Set(ids); renderStack(); })
-    .catch(err => log('Could not load the ID list: ' + err.message));
+function saveStatus_(cls, msg) {
+  const el = document.getElementById('save-status');
+  el.className = 'save-status ' + cls;
+  el.textContent = msg;
+  el.hidden = false;
+  el.scrollIntoView({ block: 'center' });
+}
+
+// The sheet's rows (ID, Label, ParentID): names for every ID, a typo shows
+// up as NEW, and a container opens with what the sheet says is in it now.
+let index = null; // upper-case ID -> row
+const key_ = v => String(v || '').trim().toUpperCase();
+function loadIndex_() {
+  fetch(BASE_URL + '?scope=index').then(r => r.json())
+    .then(rows => {
+      index = {};
+      rows.forEach(r => { index[key_(r.ID)] = index[key_(r.ID)] || r; });
+      if (anchor) priorFromSheet_();
+      renderStack();
+    })
+    .catch(err => log('Could not load the inventory list: ' + err.message));
+}
+function priorFromSheet_() {
+  if (!index || !index[anchor]) return false;
+  priorState = Object.values(index).filter(r => key_(r.ParentID) === anchor).map(r => key_(r.ID));
+  priorFrom = 'sheet';
+  return true;
+}
+function openAnchor_(id, labelChildren) {
+  anchor = id; session = [];
+  if (!priorFromSheet_()) { priorState = labelChildren; priorFrom = labelChildren.length ? 'label' : null; }
+  loadIndex_(); // someone may have moved things since the page loaded
+}
+function nameOf_(node) {
+  const id = head(node), r = index && index[id];
+  const inside = Array.isArray(node) && node.length > 1 ? ' (+' + (node.length - 1) + ' inside)' : '';
+  return (r && r.Label ? r.Label + ' · ' + id : id) + (index && !r ? '  ★ NEW' : '') + inside;
 }
 
 // Snapshot the live camera feed once, at close time -- not per individual
@@ -786,14 +827,6 @@ function saveCubeToId() {
     .catch(err => log('Save failed: ' + err.message));
 }
 
-// ── localStorage cache ────────────────────────────────────────────────────
-function cacheGet(id) {
-  try { return JSON.parse(localStorage.getItem('ss:' + id)); } catch(_) { return null; }
-}
-function cacheSet(id, tree) {
-  try { localStorage.setItem('ss:' + id, JSON.stringify(tree)); } catch(_) {}
-}
-
 // ── Parser ────────────────────────────────────────────────────────────────
 function parse(str) {
   str = str.trim();
@@ -848,42 +881,29 @@ function merge(prior, sess) {
 
 // ── Stack display ─────────────────────────────────────────────────────────
 function renderStack() {
-  const children = merge(priorState, session);
-  const tree     = anchor ? [anchor, ...children] : children;
-  let display = tree.length > 0 ? pretty(tree) : '—';
-  if (anchor) display += '\n  ▸ (scan or type an item to put it in here)';
-  const fresh = knownIds ? ids_(tree).filter(id => !knownIds.has(id)) : [];
-  if (fresh.length) display += '\n\n★ NEW, not in the inventory yet: ' + fresh.join(', ') + '\n  (a typo? press Undo)';
-  document.getElementById('stack-display').textContent = display;
-}
-
-// ── Last-seen banner ──────────────────────────────────────────────────────
-function showLastSeen(id) {
-  const cached = cacheGet(id);
-  const el = document.getElementById('last-seen');
-  if (!cached) { el.textContent=''; return; }
-  const s = serialize(cached);
-  el.innerHTML = 'last saved on this phone: <code>' + s.slice(0,80)+(s.length>80?'…':'')+'</code> '
-    + '<button onclick="useCached()">use</button>';
-  el._cached = cached;
-}
-function useCached() {
-  const el=document.getElementById('last-seen'), cached=el._cached;
-  if (!cached||!Array.isArray(cached)) return;
-  priorState = merge(cached.slice(1), priorState);
-  renderStack(); log('Loaded cache for '+head(cached));
-  el.textContent='';
+  const el = document.getElementById('stack-display');
+  if (!anchor) { el.textContent = 'Scan or type a container to start.'; return; }
+  const adding = new Set(session.map(head));
+  const already = priorState.filter(n => !adding.has(head(n)));
+  let d = 'Container: ' + nameOf_(anchor) + '\n';
+  d += priorFrom === 'label' ? '\nIn it, per its printed label (sheet not reachable):\n'
+                             : '\nIn it now' + (index ? ', per the sheet' : '') + ':\n';
+  d += already.length ? already.map(n => '  ' + nameOf_(n)).join('\n') : '  (nothing)';
+  if (session.length) d += '\n\nAdding:\n' + session.map(n => '  + ' + nameOf_(n)).join('\n');
+  if (d.includes('★ NEW')) d += '\n\n★ NEW = not in the inventory yet. A typo? Press Undo.';
+  d += '\n\n▸ Scan or type an item to put it in here.';
+  el.textContent = d;
 }
 
 // ── Undo ──────────────────────────────────────────────────────────────────
 function saveHistory() {
-  history.push({ anchor, priorState:[...priorState], session:[...session] });
+  history.push({ anchor, priorState:[...priorState], priorFrom, session:[...session] });
   if (history.length > 20) history.shift();
 }
 function undoLast() {
   if (!history.length) { log('Nothing to undo'); return; }
   const prev = history.pop();
-  anchor=prev.anchor; priorState=prev.priorState; session=prev.session;
+  anchor=prev.anchor; priorState=prev.priorState; priorFrom=prev.priorFrom; session=prev.session;
   renderStack(); log('Undo');
 }
 
@@ -904,10 +924,7 @@ function pushNode(node) {
   if (anchor && node === anchor) { doClose(); return; }
   saveHistory();
   if (!anchor) {
-    anchor = head(node);
-    priorState = Array.isArray(node) ? node.slice(1) : [];
-    session = [];
-    showLastSeen(anchor);
+    openAnchor_(head(node), Array.isArray(node) ? node.slice(1) : []);
   } else {
     session.push(node);
   }
@@ -917,47 +934,59 @@ function pushNode(node) {
 
 // ── Closure ───────────────────────────────────────────────────────────────
 async function doClose() {
-  if (!anchor && session.length===0) { log('Nothing to close'); return; }
+  if (!anchor) { log('Nothing to save'); return; }
 
-  const ts       = ['T', Date.now().toString(36).slice(-4).toUpperCase()];
-  const children = merge(priorState, [...session, ts]);
-  const tree     = anchor ? [anchor, ...children] : children;
-  const scheme   = serialize(tree);
-  const payload  = URL_PREFIX + scheme;
-  const tsHuman  = new Date().toLocaleString('en-US',{hour12:false});
+  const ts      = ['T', Date.now().toString(36).slice(-4).toUpperCase()];
+  // The label carries everything inside; the sheet only needs what changed.
+  // Items the sheet already lists are not re-sent (that would re-stamp them
+  // as scanned); label-sourced ones are, as before.
+  const tree    = [anchor, ...merge(priorState, [...session, ts])];
+  const sent    = [anchor, ...(priorFrom === 'label' ? merge(priorState, [...session, ts]) : [...session, ts])];
+  const scheme  = serialize(sent);
+  const payload = URL_PREFIX + serialize(tree);
+  const tsHuman = new Date().toLocaleString('en-US',{hour12:false});
+  const was     = { anchor, priorState, priorFrom, session };
+  const name    = nameOf_(anchor);
 
-  document.getElementById('closure').textContent    = pretty(tree);
-  document.getElementById('url-display').textContent = payload;
-
-  if (anchor) cacheSet(anchor, tree);
-  if (knownIds) ids_(tree).forEach(id => knownIds.add(id));
-  renderQRCanvas(payload, anchor||head(tree), tsHuman);
-
-  const doPrint = !document.getElementById('confirm-print').checked ||
-    confirm('Print label for ' + (anchor||'?') + '?');
-
-  if (doPrint) {
-    if (btChar) await sendPrint(payload, anchor||head(tree), tsHuman);
-    else log('No printer — QR on screen only');
-  }
-
-  commitToServer(scheme, captureSnapshot_());
+  saveStatus_('saving', 'Saving ' + name + '…');
   log('Saving: ' + scheme);
-
-  anchor=null; priorState=[]; session=[]; history=[];
+  const photo = captureSnapshot_();
+  anchor=null; priorState=[]; priorFrom=null; session=[]; history=[];
   lastScanId=null;
   renderStack();
-  document.getElementById('last-seen').textContent='';
+
+  const err = await commitToServer(scheme, photo);
+  if (err) {
+    log('NOT saved: ' + err);
+    // Put the list back so Save + label can simply be pressed again.
+    const restored = !anchor;
+    if (restored) { ({ anchor, priorState, priorFrom, session } = was); renderStack(); }
+    saveStatus_('err', '✗ ' + name + ' was NOT saved (' + err + '). Nothing was recorded.' +
+      (restored ? ' Your list is back above: press Save + label to try again.' : ''));
+    return;
+  }
+  log('Saved to sheet');
+  document.getElementById('closure').textContent    = pretty(tree);
+  document.getElementById('url-display').textContent = payload;
+  renderQRCanvas(payload, was.anchor, tsHuman);
+  saveStatus_('ok', '✓ Saved to sheet: ' + name + ' (' + new Date().toLocaleTimeString('en-US',{hour12:false}) + ')');
+  loadIndex_();
+
+  const doPrint = !document.getElementById('confirm-print').checked ||
+    confirm('Print label for ' + was.anchor + '?');
+  if (doPrint) {
+    if (btChar) await sendPrint(payload, was.anchor, tsHuman);
+    else log('No printer — QR on screen only');
+  }
 }
 
 function manualClose() { doClose(); }
 
 function clearStack() {
   saveHistory();
-  anchor=null; priorState=[]; session=[];
+  anchor=null; priorState=[]; priorFrom=null; session=[];
   lastScanId=null;
   renderStack();
-  document.getElementById('last-seen').textContent='';
   log('Cleared');
 }
 
@@ -995,10 +1024,7 @@ function onScan(raw) {
 
   if (!anchor) {
     saveHistory();
-    anchor     = scannedHead;
-    priorState = scannedChildren;
-    session    = [];
-    showLastSeen(scannedHead);
+    openAnchor_(scannedHead, scannedChildren);
     renderStack();
     log('OPEN: ' + scannedHead);
   } else if (scannedHead === anchor) {
@@ -1006,11 +1032,12 @@ function onScan(raw) {
       log('SKIP trivial re-scan of empty context');
       return;
     }
-    priorState = merge(priorState, scannedChildren);
+    if (priorFrom === 'label') priorState = merge(priorState, scannedChildren);
     doClose();
   } else {
     saveHistory();
-    const node = scannedChildren.length > 0 ? tree : scannedHead;
+    // A scanned label's own contents count only when the sheet can't be read.
+    const node = scannedChildren.length > 0 && !index ? tree : scannedHead;
     session.push(node);
     renderStack();
     log('Added: ' + serialize(Array.isArray(node)?node:[node]));
@@ -1176,10 +1203,7 @@ function bootFromHash() {
   log('Loading from URL: ' + hash.slice(0,60));
   const tree = parse(decodeURIComponent(hash));
   if (!tree||tree.length===0) return;
-  anchor     = Array.isArray(tree[0]) ? tree[0][0] : tree[0];
-  priorState = tree.slice(1);
-  session    = [];
-  showLastSeen(anchor);
+  openAnchor_(Array.isArray(tree[0]) ? tree[0][0] : tree[0], tree.slice(1));
   renderStack();
   log('Bootstrapped: ' + anchor);
 }
@@ -1190,7 +1214,7 @@ function initScan() {
   startCamera();
   bootFromHash();
   renderStack();
-  loadKnownIds_();
+  loadIndex_();
   log('Scan ready');
 }
 </script>
