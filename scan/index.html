@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="a2424b985658d4c6c078f6466d378117abb3379d">
+  <meta name="inventory-app-ref" content="129c9c7d5290908613682b0f50ab9776b6b58be1">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -317,6 +317,11 @@
   .edit-toolbar .details { flex-basis: 100%; font-size: 14px; max-height: 40vh; overflow-y: auto; }
   .edit-toolbar .details a { color: cyan; }
   .details-photo { max-width: 120px; }
+  .scan-help { font-size: 14px; color: #ccc; margin: 6px 0; font-family: sans-serif; }
+  .scan-help button { margin: 4px 4px 0 0; }
+  .edit-form { padding: 0 1rem; }
+  .edit-form label { display: block; margin: 0.6rem 0 0.2rem; }
+  .edit-form textarea, .edit-form input[type=text] { width: 100%; box-sizing: border-box; font-size: 16px; }
   .save-status { margin: 6px 0; padding: 0.5rem; font-size: 16px; font-weight: bold; border-radius: 4px; }
   .save-status.saving { background: #333; color: #ff0; }
   .save-status.ok { background: #063; color: #fff; }
@@ -401,9 +406,7 @@
     color: #ccc;
     text-align: center;
     max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   /* Last bug-sweep / nightly-batch readout on the Report tab -- see
@@ -479,8 +482,8 @@
      that doClose() now commits to the Inventory sheet via commitScan()
      instead of POSTing to a local /log file. -->
 
-<b>Scan</b> — <span id="bt-status">printer not connected</span> — <button onclick="toggleBT()" id="bt-btn">Connect Printer</button>
-<br><br>
+<b>Scan</b> — <span id="bt-status">printer not connected</span> <button onclick="toggleBT()" id="bt-btn">Connect Printer</button>
+<p class="scan-help">Checking gear out looks just like checking it in: scan a bin (empty, newly minted, or anything), scan each item into it, then Save. Just bins and bins.</p>
 
 <div id="camera-wrap">
   <video id="video" autoplay playsinline muted></video>
@@ -488,6 +491,7 @@
 </div>
 
 <pre id="stack-display">—</pre>
+<div id="virtual-row" class="scan-help" hidden>Lost, broken or retired gear goes in one of these instead of a bin: <span id="virtual-btns"></span></div>
 
 <input type="text" id="push-input" placeholder="type an ID and press Enter…" onkeydown="onPushKey(event)">
 <button onclick="manualClose()">Save + label</button>
@@ -597,8 +601,14 @@ function saveStatus_(cls, msg) {
 
 // The sheet's rows (ID, Label, ParentID): names for every ID, a typo shows
 // up as NEW, and a container opens with what the sheet says is in it now.
-let index = null; // upper-case ID -> row
-const key_ = v => String(v || '').trim().toUpperCase();
+let index = null; // key_(ID) -> row
+// Same rule as idKey_ in src/Data.gs: case and _/-/space don't matter.
+const key_ = v => String(v || '').trim().toLowerCase().replace(/[\s_-]+/g, '-');
+// A typed or scanned ID: lowercase-dash when new, the sheet's spelling when known.
+const toId_ = t => String(t).trim().toLowerCase().replace(/[\s_]+/g, '-');
+const canon_ = id => (index && index[key_(id)] ? String(index[key_(id)].ID).trim() : id);
+const canonTree_ = n => Array.isArray(n) ? n.map(canonTree_) : canon_(n);
+const same_ = (a, b) => key_(a) === key_(b);
 function loadIndex_() {
   fetch(BASE_URL + '?scope=index').then(r => r.json())
     .then(rows => {
@@ -610,8 +620,8 @@ function loadIndex_() {
     .catch(err => log('Could not load the inventory list: ' + err.message));
 }
 function priorFromSheet_() {
-  if (!index || !index[anchor]) return false;
-  priorState = Object.values(index).filter(r => key_(r.ParentID) === anchor).map(r => key_(r.ID));
+  if (!index || !index[key_(anchor)]) return false;
+  priorState = Object.values(index).filter(r => same_(r.ParentID, anchor)).map(r => String(r.ID).trim());
   priorFrom = 'sheet';
   return true;
 }
@@ -621,7 +631,7 @@ function openAnchor_(id, labelChildren) {
   loadIndex_(); // someone may have moved things since the page loaded
 }
 function nameOf_(node) {
-  const id = head(node), r = index && index[id];
+  const id = canon_(head(node)), r = index && index[key_(id)];
   const inside = Array.isArray(node) && node.length > 1 ? ' (+' + (node.length - 1) + ' inside)' : '';
   return (r && r.Label ? r.Label + ' · ' + id : id) + (index && !r ? '  ★ NEW' : '') + inside;
 }
@@ -819,7 +829,8 @@ function cancelCubeCapture() {
 }
 
 function saveCubeToId() {
-  const id = document.getElementById('cube-id-input').value.trim().toUpperCase() || anchor;
+  const typed = document.getElementById('cube-id-input').value.trim();
+  const id = canon_(typed ? toId_(typed) : anchor || '');
   if (!id) { log('Enter an ID, or scan a container first.'); return; }
   if (!window._lastCubeDataUrl) return;
   postToServer_({ type: 'sprite', id, dataUrl: window._lastCubeDataUrl })
@@ -831,7 +842,7 @@ function saveCubeToId() {
 function parse(str) {
   str = str.trim();
   if (!str.includes('(') && !str.includes(')')) {
-    return [str.toUpperCase()];
+    return [toId_(str)];
   }
   if (!str.startsWith('(')) str = '(' + str + ')';
   const tokens = str.replace(/\(/g,' ( ').replace(/\)/g,' ) ').split(/\s+/).filter(Boolean);
@@ -839,7 +850,7 @@ function parse(str) {
   for (const t of tokens) {
     if (t==='(') { const l=[]; stk[stk.length-1].push(l); stk.push(l); }
     else if (t===')') { stk.pop(); }
-    else stk[stk.length-1].push(t.toUpperCase());
+    else stk[stk.length-1].push(toId_(t));
   }
   if (root.length===1 && Array.isArray(root[0])) return root[0];
   return root;
@@ -873,7 +884,7 @@ function pretty(node, indent, width) {
 function merge(prior, sess) {
   const seq=[...prior,...sess], seen=new Set(), result=[];
   for (let i=seq.length-1;i>=0;i--) {
-    const h=head(seq[i]);
+    const h=key_(head(seq[i]));
     if (!seen.has(h)) { seen.add(h); result.unshift(seq[i]); }
   }
   return result;
@@ -882,9 +893,18 @@ function merge(prior, sess) {
 // ── Stack display ─────────────────────────────────────────────────────────
 function renderStack() {
   const el = document.getElementById('stack-display');
+  const virt = index ? Object.values(index).filter(r => r.Virtual) : [];
+  document.getElementById('virtual-row').hidden = !!anchor || !virt.length;
+  document.getElementById('virtual-btns').innerHTML = '';
+  virt.forEach(r => {
+    const b = document.createElement('button');
+    b.textContent = r.Label || r.ID;
+    b.onclick = () => pushNode(String(r.ID));
+    document.getElementById('virtual-btns').appendChild(b);
+  });
   if (!anchor) { el.textContent = 'Scan or type a container to start.'; return; }
-  const adding = new Set(session.map(head));
-  const already = priorState.filter(n => !adding.has(head(n)));
+  const adding = new Set(session.map(n => key_(head(n))));
+  const already = priorState.filter(n => !adding.has(key_(head(n))));
   let d = 'Container: ' + nameOf_(anchor) + '\n';
   d += priorFrom === 'label' ? '\nIn it, per its printed label (sheet not reachable):\n'
                              : '\nIn it now' + (index ? ', per the sheet' : '') + ':\n';
@@ -910,18 +930,18 @@ function undoLast() {
 // ── Manual push via input ─────────────────────────────────────────────────
 function onPushKey(e) {
   if (e.key !== 'Enter') return;
-  const val = document.getElementById('push-input').value.trim().toUpperCase();
+  const val = document.getElementById('push-input').value.trim();
   if (!val) return;
   document.getElementById('push-input').value = '';
   if (val.startsWith('(')) { pushNode(parse(val)); return; }
-  // The server splits on whitespace, so "POWER STRIP" would save as two items.
-  pushNode(val.replace(/\s+/g, '_'));
+  // "mic stand" -> mic-stand: the server splits on whitespace.
+  pushNode(toId_(val));
 }
 
 function pushNode(node) {
   // Typing the anchor again closes, same as re-scanning its label; pushing it
   // would make the anchor its own parent and drop it off the floor map.
-  if (anchor && node === anchor) { doClose(); return; }
+  if (anchor && !Array.isArray(node) && same_(node, anchor)) { doClose(); return; }
   saveHistory();
   if (!anchor) {
     openAnchor_(head(node), Array.isArray(node) ? node.slice(1) : []);
@@ -936,12 +956,12 @@ function pushNode(node) {
 async function doClose() {
   if (!anchor) { log('Nothing to save'); return; }
 
-  const ts      = ['T', Date.now().toString(36).slice(-4).toUpperCase()];
+  const ts      = ['t', Date.now().toString(36).slice(-4)];
   // The label carries everything inside; the sheet only needs what changed.
   // Items the sheet already lists are not re-sent (that would re-stamp them
   // as scanned); label-sourced ones are, as before.
-  const tree    = [anchor, ...merge(priorState, [...session, ts])];
-  const sent    = [anchor, ...(priorFrom === 'label' ? merge(priorState, [...session, ts]) : [...session, ts])];
+  const tree    = canonTree_([anchor, ...merge(priorState, [...session, ts])]);
+  const sent    = canonTree_([anchor, ...(priorFrom === 'label' ? merge(priorState, [...session, ts]) : [...session, ts])]);
   const scheme  = serialize(sent);
   const payload = URL_PREFIX + serialize(tree);
   const tsHuman = new Date().toLocaleString('en-US',{hour12:false});
@@ -968,14 +988,15 @@ async function doClose() {
   log('Saved to sheet');
   document.getElementById('closure').textContent    = pretty(tree);
   document.getElementById('url-display').textContent = payload;
-  renderQRCanvas(payload, was.anchor, tsHuman);
-  saveStatus_('ok', '✓ Saved to sheet: ' + name + ' (' + new Date().toLocaleTimeString('en-US',{hour12:false}) + ')');
+  renderQRCanvas(payload, tree[0], tsHuman);
+  saveStatus_('ok', '✓ Saved to sheet: ' + name + ' (' + new Date().toLocaleTimeString('en-US',{hour12:false}) + ')' +
+    (btChar ? '' : '. No label printed (no printer connected); its QR code is below.'));
   loadIndex_();
 
   const doPrint = !document.getElementById('confirm-print').checked ||
-    confirm('Print label for ' + was.anchor + '?');
+    confirm('Print label for ' + tree[0] + '?');
   if (doPrint) {
-    if (btChar) await sendPrint(payload, was.anchor, tsHuman);
+    if (btChar) await sendPrint(payload, tree[0], tsHuman);
     else log('No printer — QR on screen only');
   }
 }
@@ -994,7 +1015,7 @@ function clearStack() {
 function isScanScriptQR(raw) {
   if (raw.includes(URL_HOST)) return true;
   if (raw.startsWith('(')) return true;
-  if (/^[A-Z0-9_\-]+$/i.test(raw.trim())) return true;
+  if (/^[A-Z0-9_.\-]+$/i.test(raw.trim())) return true;
   return false;
 }
 
@@ -1014,7 +1035,7 @@ function onScan(raw) {
   const scannedHead     = Array.isArray(tree[0]) ? tree[0][0] : tree[0];
   const scannedChildren = tree.slice(1);
 
-  if (scannedHead === lastScanId && session.length === 0 && priorState.length === 0) {
+  if (same_(scannedHead, lastScanId) && session.length === 0 && priorState.length === 0) {
     log('SKIP trivial double-scan: ' + scannedHead);
     return;
   }
@@ -1027,7 +1048,7 @@ function onScan(raw) {
     openAnchor_(scannedHead, scannedChildren);
     renderStack();
     log('OPEN: ' + scannedHead);
-  } else if (scannedHead === anchor) {
+  } else if (same_(scannedHead, anchor)) {
     if (session.length === 0 && priorState.length === 0) {
       log('SKIP trivial re-scan of empty context');
       return;
@@ -1210,6 +1231,12 @@ function bootFromHash() {
 
 // ── Init: called once, lazily, when the Scan tab is first opened ──────────
 function initScan() {
+  // iPhone browsers (Safari, Chrome) have no Web Bluetooth.
+  if (!navigator.bluetooth) {
+    document.getElementById('bt-status').textContent =
+      'printing labels is not available in this browser (iPhone browsers have no Bluetooth). Saving still works, and each label\'s QR code shows on screen.';
+    document.getElementById('bt-btn').hidden = true;
+  }
   loadPrefs();
   startCamera();
   bootFromHash();
