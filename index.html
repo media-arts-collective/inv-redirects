@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="1fa499afaceed24fbafd2e5e064d20022284e281">
+  <meta name="inventory-app-ref" content="1dc63ae5b7011ba3a8acaaee2557553a13692326">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -281,6 +281,7 @@
   .find input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 0.5rem; }
   #find-results { color: #888; }
   #find-results button { display: block; width: 100%; text-align: left; margin-top: 4px; padding: 0.5rem; font-size: 15px; }
+  .load-note { margin: 0; padding: 0.4rem 1rem; color: #0ff; font-size: 15px; }
   .find-note { margin: 0; padding: 0.4rem 1rem; color: #ff0; background: #000; font-size: 15px; }
   .floor-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 1rem 1rem; }
   .floor-list button { font-size: 15px; padding: 0.4rem 0.7rem; }
@@ -368,22 +369,17 @@
   .shelf-slot.dragging { cursor: grabbing; transition: none; opacity: 0.85; z-index: 50; }
 
   /* ── Level 2: top-down assorted-item grid ────────────────────────────── */
-  .topdown-grid {
-    position: relative;
-    min-height: 300px;
-    padding: 1rem;
-  }
+  .topdown-grid { position: relative; }
+  /* GRID_CELL_PX (80) in browse.html; --w is 1, or 2 for a bin. */
   .grid-cell {
     position: absolute;
-    left: calc(var(--col) * 90px);
-    top: calc(var(--row) * 90px);
-    width: 72px;
+    left: calc(var(--col) * 80px);
+    top: calc(var(--row) * 80px);
+    width: calc(var(--w) * 80px - 6px);
+    height: 74px;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    border: 2px solid transparent;
+    justify-content: center;
     border-radius: 6px;
-    padding: 0.2rem;
     cursor: grab;
     touch-action: none;
     transition: transform 0.1s ease, left 0.12s ease-out, top 0.12s ease-out; /* see .stack-wrap's own transition comment above */
@@ -400,7 +396,6 @@
     user-select: none;
     filter: drop-shadow(2px 3px 2px rgba(0,0,0,0.6));
   }
-  .flat-icon--small { width: 48px; height: 48px; }
   .flat-icon-label {
     font-size: 0.7em;
     color: #ccc;
@@ -571,16 +566,18 @@ function switchTab(name) {
      its sheet details (read-only); moving, re-iconing, rotating and
      resizing work only after "Edit map" is switched on. -->
 <div class="find">
-  <input id="find-input" type="search" placeholder="🔍 Find gear by name or ID" autocomplete="off" oninput="findGear_(this.value)">
+  <input id="find-input" type="search" placeholder="🔍 Find gear by name or ID" autocomplete="off" oninput="findGear_(this.value)" onfocus="withIndex_(() => {})">
   <div id="find-results"></div>
-  <button id="edit-toggle" class="edit-toggle" onclick="toggleEdit_()">✏️ Edit map</button>
 </div>
 <nav class="crumbs" id="crumbs"></nav>
+<p id="load-note" class="load-note" hidden></p>
 <p id="find-note" class="find-note" hidden></p>
 <div id="floor-list" class="floor-list"></div>
 <section class="map-wrapper">
   <div class="map-container" id="map-container"></div>
 </section>
+<!-- Below the map, away from the search box: it changes the map for everyone. -->
+<button id="edit-toggle" class="edit-toggle" onclick="toggleEdit_()">✏️ Edit map</button>
 <div class="edit-toolbar" id="edit-toolbar" hidden></div>
 
 <script>
@@ -594,7 +591,12 @@ function hashStringToColor(str) {
 }
 
 function showEmpty(msg) {
-  document.getElementById('map-container').innerHTML = '<p class="map-empty">' + msg + '</p>';
+  clearMap_();
+  document.getElementById('map-container').innerHTML = '<p class="map-empty">' + esc_(msg) + ' Check your connection, then try again.</p>';
+}
+function clearMap_() {
+  const c = document.getElementById('map-container');
+  c.innerHTML = ''; c.style.transform = ''; c.closest('.map-wrapper').style.height = '';
 }
 
 function spriteForItem(o) {
@@ -658,6 +660,15 @@ function resolvedStyleKey_(o) {
 // style.html -- rather than reusing the box sprite fallback. Only checked
 // for a root item's OWN layer (index 0 in a stack) -- a piled child always
 // has some real Container Style of its own.
+// A container opens to its contents, even when nothing is recorded inside:
+// it has something inside, or its Container Style is a box kind, or it is
+// a place on the Floor (no ParentID, no style of its own).
+const BOX_STYLE_ = /crate|bin|box|shelf|stack|road-case/;
+function isContainer_(o, inside) {
+  const key = resolvedStyleKey_(o);
+  return Number(inside || 0) > 0 || BOX_STYLE_.test(key) || (!idKey_(o.ParentID) && !key);
+}
+
 function isLooseStyle_(o) {
   const key = resolvedStyleKey_(o);
   return key === 'self' || key === 'loose';
@@ -740,7 +751,7 @@ function renderCrumbs() {
 }
 
 // The open container's own details (the map's double-click is mouse-only).
-function showHere_() { selectItem_(Object.assign({}, navStack[navStack.length - 1], { ChildCount: 0 }), null, null); }
+function showHere_() { selectItem_(navStack[navStack.length - 1], 'here', null); }
 function goHome() { navStack = []; hideToolbar(); renderCurrentView(); }
 function goToCrumb(i) { navStack = navStack.slice(0, i + 1); hideToolbar(); renderCurrentView(); }
 
@@ -755,12 +766,16 @@ function drillInto(o) {
 // projections exist below the root map for now; a genuinely different
 // container shape (see README's shelf TODO) would add a third case here,
 // not replace either of these.
+// view_ drops a slow answer for a view the user has already left.
+let view_ = 0;
 function renderCurrentView() {
   renderCrumbs();
+  clearMap_();
+  const v = ++view_;
   const current = navStack.length ? navStack[navStack.length - 1] : null;
-  if (!current) { renderIsoRoot(); return; }
-  if (resolvedStyleKey_(current) === 'shelf') renderFrontShelf(current);
-  else renderTopDown(current);
+  if (!current) { renderIsoRoot(v); return; }
+  if (resolvedStyleKey_(current) === 'shelf') renderFrontShelf(current, v);
+  else renderTopDown(current, v);
 }
 
 // ── Level 0: isometric floor (root containers) ──────────────────────────
@@ -821,14 +836,24 @@ function get_(params) {
     .then(r => r.text())
     .then(t => { try { return JSON.parse(t); } catch (_) { throw new Error('server did not answer with JSON'); } });
 }
+// Every Browse read shows that it is loading; failures are shown by the caller.
+let loading_ = 0;
+function load_(what, params) {
+  const n = document.getElementById('load-note');
+  loading_++;
+  n.textContent = 'Loading ' + what + '…'; n.hidden = false;
+  const done = () => { if (--loading_ === 0) n.hidden = true; };
+  return get_(params).then(v => { done(); return v; }, err => { done(); throw err; });
+}
 function save_(id, fields, what) {
   fetch(BASE_URL, { method: 'POST', body: JSON.stringify({ type: 'update', id, fields }) })
     .then(r => r.json())
     .catch(err => alert(what + ' failed: ' + err.message));
 }
 
-function renderIsoRoot() {
-  get_({ scope: 'roots' }).then(function (roots) {
+function renderIsoRoot(v) {
+  load_('the Floor', { scope: 'roots' }).then(function (roots) {
+    if (v !== view_) return;
     const container = document.getElementById('map-container');
     container.className = 'map-container map-container--iso';
     const wrapper = container.closest('.map-wrapper');
@@ -943,7 +968,7 @@ function renderIsoRoot() {
       container.appendChild(wrap);
     });
   }).catch(function (err) {
-    showEmpty('Map failed to load: ' + err.message);
+    if (v === view_) showEmpty('Map failed to load: ' + err.message + '.');
   });
 }
 
@@ -991,7 +1016,7 @@ function makeDraggableIso_(wrap, o, roots) {
     // the drill is debounced (see DBLCLICK_WINDOW_MS above) so the second
     // click of that same double-click can cancel it instead of also firing.
     if (!moved) {
-      if (Number(o.ChildCount || 0) === 0) { selectItem_(o, 'iso-root', wrap); return; }
+      if (!isContainer_(o, o.ChildCount)) { selectItem_(o, 'iso-root', wrap); return; }
       if (pendingDrill) { clearTimeout(pendingDrill); pendingDrill = null; return; }
       pendingDrill = setTimeout(() => { pendingDrill = null; drillInto(o); }, DBLCLICK_WINDOW_MS);
       return;
@@ -1040,8 +1065,9 @@ function makeDraggableIso_(wrap, o, roots) {
 // used to read as a tilted 3D box in a straight row.
 const SHELF_SLOT_PX = 110;
 
-function renderFrontShelf(shelf) {
-  get_({ scope: 'children', id: shelf.ID }).then(function (children) {
+function renderFrontShelf(shelf, v) {
+  load_(shelf.Label || shelf.ID, { scope: 'children', id: shelf.ID }).then(function (children) {
+    if (v !== view_) return;
     const container = document.getElementById('map-container');
     container.className = 'map-container map-container--flat';
     const wrapper = container.closest('.map-wrapper');
@@ -1109,7 +1135,7 @@ function renderFrontShelf(shelf) {
       row.appendChild(slot);
     });
   }).catch(function (err) {
-    showEmpty('Shelf failed to load: ' + err.message);
+    if (v === view_) showEmpty('Shelf failed to load: ' + err.message + '.');
   });
 }
 
@@ -1140,7 +1166,7 @@ function makeDraggableShelfSlot_(slot, o, siblings) {
     // it, double-clicking a drillable slot fires drillInto() from both
     // constituent clicks before the native dblclick's own select ever runs.
     if (!moved) {
-      if (Number(o.ChildCount || 0) === 0) { selectItem_(o, 'shelf', slot); return; }
+      if (!isContainer_(o, o.ChildCount)) { selectItem_(o, 'shelf', slot); return; }
       if (pendingDrill) { clearTimeout(pendingDrill); pendingDrill = null; return; }
       pendingDrill = setTimeout(() => { pendingDrill = null; drillInto(o); }, DBLCLICK_WINDOW_MS);
       return;
@@ -1170,59 +1196,66 @@ function makeDraggableShelfSlot_(slot, o, siblings) {
   });
 }
 
-// ── Level 2 (bin/crate/etc.): top-down assorted-item grid ───────────────
-// Looked INTO, not at -- a plain row/col grid from MapX/MapY, same "no
-// isometric math" simplification as the shelf level above but in two
-// axes instead of one, since there's no natural "front" to a loosely
-// packed bin the way a shelf face has one.
-const GRID_CELL_PX = 90;
+// ── Level 2 (bin/crate/etc.): top-down tiles ────────────────────────────
+// Looked INTO, not at. Each thing inside is a bare icon tile, 1x1, or 2x1
+// for a bin (its MapW), on a GRID_COLS-wide grid that fits a phone (#25).
+// Names are the buttons above the map; tapping either opens or selects.
+const GRID_CELL_PX = 80;
+const GRID_COLS = 4;
 
-function renderTopDown(bin) {
-  get_({ scope: 'children', id: bin.ID }).then(function (children) {
+// A tile whose stored cell is taken or off the grid is shown in the first
+// free cell instead (display only: nothing is saved unless it is dragged).
+function placeTiles_(children) {
+  const taken = {};
+  const free = (c, r, w) => c >= 0 && r >= 0 && c + w <= GRID_COLS &&
+    [...Array(w).keys()].every(i => !taken[r + ',' + (c + i)]);
+  children.forEach(o => {
+    o._w = Math.min(2, Math.max(1, Number(o.MapW || 1)));
+    let c = Number(o.MapX || 0), r = Number(o.MapY || 0);
+    for (let i = 0; !free(c, r, o._w); i++) { c = i % GRID_COLS; r = Math.floor(i / GRID_COLS); }
+    for (let i = 0; i < o._w; i++) taken[r + ',' + (c + i)] = true;
+    o.MapX = c; o.MapY = r;
+  });
+}
+
+function renderTopDown(bin, v) {
+  load_(bin.Label || bin.ID, { scope: 'children', id: bin.ID }).then(function (children) {
+    if (v !== view_) return;
     const container = document.getElementById('map-container');
     container.className = 'map-container map-container--flat';
     const wrapper = container.closest('.map-wrapper');
-    container.innerHTML = '';
-    container.style.transform = '';
-    wrapper.style.height = '';
     wrapper.classList.add('map-wrapper--scroll');
     wrapper.scrollLeft = 0; // a previous view's (or markFound_'s) scroll would carry over
 
     const grid = document.createElement('div');
     grid.className = 'topdown-grid';
+    grid.style.width = (GRID_COLS * GRID_CELL_PX) + 'px';
     container.appendChild(grid);
 
     if (!children || children.length === 0) {
-      grid.insertAdjacentHTML('beforeend', '<p class="map-empty">Nothing recorded inside this container yet.</p>');
+      grid.insertAdjacentHTML('beforeend', '<p class="map-empty">Empty: nothing has been scanned into ' + esc_(bin.Label || bin.ID) + ' yet.</p>');
+      showHere_();
       return;
     }
 
-    // Same fix as renderFrontShelf's row.style.width above, in both axes --
-    // see the comment there for why an explicit size is needed at all.
-    const maxCol = Math.max(0, ...children.map(c => Number(c.MapX || 0)));
-    const maxRow = Math.max(0, ...children.map(c => Number(c.MapY || 0)));
-    grid.style.width = ((maxCol + 1) * GRID_CELL_PX) + 'px';
-    grid.style.minHeight = ((maxRow + 1) * GRID_CELL_PX) + 'px';
+    placeTiles_(children);
+    grid.style.height = ((Math.max(...children.map(c => c.MapY)) + 1) * GRID_CELL_PX) + 'px';
+    const list = document.getElementById('floor-list');
 
     children.forEach(function (child) {
       const cell = document.createElement('div');
       cell.className = 'grid-cell';
-      cell.style.setProperty('--col', Number(child.MapX || 0));
-      cell.style.setProperty('--row', Number(child.MapY || 0));
+      cell.style.setProperty('--col', child.MapX);
+      cell.style.setProperty('--row', child.MapY);
+      cell.style.setProperty('--w', child._w);
       cell.title = child.Label || child.ID;
 
       const img = document.createElement('img');
-      img.className = 'flat-icon flat-icon--small';
+      img.className = 'flat-icon';
       img.src = frontSprite_(child);
       img.draggable = false;
       img.alt = child.Label || child.ID;
-      if (child.Category) cell.style.borderColor = hashStringToColor(child.Category);
       cell.appendChild(img);
-
-      const label = document.createElement('span');
-      label.className = 'flat-icon-label';
-      label.textContent = child.Label || child.ID;
-      cell.appendChild(label);
 
       // See the same badge in renderFrontShelf above.
       if (Number(child.ChildCount || 0) > 0) {
@@ -1232,12 +1265,17 @@ function renderTopDown(bin) {
         cell.appendChild(badge);
       }
 
+      const b = document.createElement('button');
+      b.textContent = child.Label || child.ID;
+      b.onclick = () => isContainer_(child, child.ChildCount) ? drillInto(child) : selectItem_(child, 'top-down', cell);
+      list.appendChild(b);
+
       markFound_(cell, child);
       makeDraggableGridCell_(cell, child, children);
       grid.appendChild(cell);
     });
   }).catch(function (err) {
-    showEmpty('Contents failed to load: ' + err.message);
+    if (v === view_) showEmpty('Contents failed to load: ' + err.message + '.');
   });
 }
 
@@ -1268,14 +1306,15 @@ function makeDraggableGridCell_(cell, o, siblings) {
     if (moved && !editMode) return;
     // See DBLCLICK_WINDOW_MS above -- same debounce, same reason.
     if (!moved) {
-      if (Number(o.ChildCount || 0) === 0) { selectItem_(o, 'top-down', cell); return; }
+      if (!isContainer_(o, o.ChildCount)) { selectItem_(o, 'top-down', cell); return; }
       if (pendingDrill) { clearTimeout(pendingDrill); pendingDrill = null; return; }
       pendingDrill = setTimeout(() => { pendingDrill = null; drillInto(o); }, DBLCLICK_WINDOW_MS);
       return;
     }
 
     const tCol = Math.max(0, Math.round(o._dragCol)), tRow = Math.max(0, Math.round(o._dragRow));
-    const blocked = siblings.some(s => s.ID !== o.ID && Number(s.MapX || 0) === tCol && Number(s.MapY || 0) === tRow);
+    const blocked = tCol + o._w > GRID_COLS ||
+      siblings.some(s => s.ID !== o.ID && s.MapY === tRow && tCol < s.MapX + s._w && s.MapX < tCol + o._w);
     if (blocked) {
       cell.style.setProperty('--col', startCol);
       cell.style.setProperty('--row', startRow);
@@ -1337,7 +1376,7 @@ function showToolbar_() {
     (editMode && selectedLevel === 'iso-root'
       ? '<button onclick="toggleRotate_()">⟳ Rotate</button><button onclick="cycleSize_()">⤢ Size</button>'
       : '') +
-    (Number(o.ChildCount || 0) > 0 ? '<button onclick="drillIntoSelected_()">🔍 Open</button>' : '') +
+    (selectedLevel !== 'here' && isContainer_(o, o.ChildCount) ? '<button onclick="drillIntoSelected_()">🔍 Open</button>' : '') +
     '<button onclick="hideToolbar()">✕</button>' +
     '<div class="details" id="details">Loading details…</div>';
   get_({ scope: 'details', id: o.ID })
@@ -1401,13 +1440,21 @@ function renderMap() { renderCurrentView(); }
 // One light index (getSearchIndex) answers both the search box and a
 // deep link (/<ID>, or a label's #(ANCHOR ...)): it holds every row's
 // ParentID, so the full Floor › ... › container path is built here.
-let searchIndex = null;
+// Re-read when older than INDEX_MAX_AGE_MS, so a save made on Scan shows up
+// without reloading (the search box prefetches on focus).
+const INDEX_MAX_AGE_MS = 30 * 1000;
+let indexP = null, indexAt = 0;
 let foundId = null;
 
 function withIndex_(cb) {
-  if (searchIndex) return cb(searchIndex);
-  get_({ scope: 'search' })
-    .then(rows => { searchIndex = rows; cb(rows); }, err => showEmpty('Search failed to load: ' + err.message));
+  if (!indexP || Date.now() - indexAt > INDEX_MAX_AGE_MS) {
+    indexAt = Date.now();
+    indexP = load_('the inventory list', { scope: 'search' });
+    indexP.catch(() => { indexP = null; });
+  }
+  indexP.then(cb, err => {
+    document.getElementById('find-results').textContent = 'Search failed to load: ' + err.message + '. Check your connection, then try again.';
+  });
 }
 
 // Same rule as idKey_ in src/Data.gs: case and _/-/space don't matter.
@@ -1462,7 +1509,7 @@ function openRow_(o) {
       seen[idKey_(p.ID)] = true;
       path.unshift(p);
     }
-    const hasChildren = rows.some(r => idKey_(r.ParentID) === idKey_(o.ID));
+    const hasChildren = isContainer_(o, rows.some(r => idKey_(r.ParentID) === idKey_(o.ID)) ? 1 : 0);
     // A container opens to its contents; anything else opens the place it
     // sits, with it outlined.
     navStack = hasChildren ? path.concat([o]) : path;

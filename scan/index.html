@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="1fa499afaceed24fbafd2e5e064d20022284e281">
+  <meta name="inventory-app-ref" content="1dc63ae5b7011ba3a8acaaee2557553a13692326">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -281,6 +281,7 @@
   .find input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 0.5rem; }
   #find-results { color: #888; }
   #find-results button { display: block; width: 100%; text-align: left; margin-top: 4px; padding: 0.5rem; font-size: 15px; }
+  .load-note { margin: 0; padding: 0.4rem 1rem; color: #0ff; font-size: 15px; }
   .find-note { margin: 0; padding: 0.4rem 1rem; color: #ff0; background: #000; font-size: 15px; }
   .floor-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 1rem 1rem; }
   .floor-list button { font-size: 15px; padding: 0.4rem 0.7rem; }
@@ -368,22 +369,17 @@
   .shelf-slot.dragging { cursor: grabbing; transition: none; opacity: 0.85; z-index: 50; }
 
   /* ── Level 2: top-down assorted-item grid ────────────────────────────── */
-  .topdown-grid {
-    position: relative;
-    min-height: 300px;
-    padding: 1rem;
-  }
+  .topdown-grid { position: relative; }
+  /* GRID_CELL_PX (80) in browse.html; --w is 1, or 2 for a bin. */
   .grid-cell {
     position: absolute;
-    left: calc(var(--col) * 90px);
-    top: calc(var(--row) * 90px);
-    width: 72px;
+    left: calc(var(--col) * 80px);
+    top: calc(var(--row) * 80px);
+    width: calc(var(--w) * 80px - 6px);
+    height: 74px;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    border: 2px solid transparent;
+    justify-content: center;
     border-radius: 6px;
-    padding: 0.2rem;
     cursor: grab;
     touch-action: none;
     transition: transform 0.1s ease, left 0.12s ease-out, top 0.12s ease-out; /* see .stack-wrap's own transition comment above */
@@ -400,7 +396,6 @@
     user-select: none;
     filter: drop-shadow(2px 3px 2px rgba(0,0,0,0.6));
   }
-  .flat-icon--small { width: 48px; height: 48px; }
   .flat-icon-label {
     font-size: 0.7em;
     color: #ccc;
@@ -493,7 +488,7 @@
 <pre id="stack-display">—</pre>
 <div id="virtual-row" class="scan-help" hidden>Putting something back on the Floor, or is it lost, broken or retired? Start with one of these instead of a bin: <span id="virtual-btns"></span></div>
 
-<input type="text" id="push-input" placeholder="type an ID and press Enter…" onkeydown="onPushKey(event)">
+<input type="text" id="push-input" placeholder="type a name or ID and press Enter…" onkeydown="onPushKey(event)">
 <button id="save-btn" onclick="doClose()" disabled>Save</button>
 <button onclick="undoLast()">Undo</button>
 <button onclick="clearStack()">Close without saving</button>
@@ -944,8 +939,20 @@ function onPushKey(e) {
   if (!val) return;
   document.getElementById('push-input').value = '';
   if (val.startsWith('(')) { pushNode(parse(val)); return; }
-  // "mic stand" -> mic-stand: the server splits on whitespace.
-  pushNode(toId_(val));
+  const id = idForTyped_(val);
+  if (id) pushNode(id);
+}
+
+// A typed ID, or else a name (Label) only one thing has. A name several
+// things share lists them instead of guessing. Unknown: a new ID, lowercase-dash.
+function idForTyped_(val) {
+  if (!index || index[key_(val)]) return toId_(val);
+  const hits = Object.values(index).filter(r => same_(r.Label, val));
+  if (hits.length === 1) return String(hits[0].ID).trim();
+  if (!hits.length) return toId_(val);
+  saveStatus_('err', '“' + val + '” is the name of ' + hits.length + ' things. Type the ID of the one you mean: ' +
+    hits.map(r => String(r.ID).trim() + (r.ParentID ? ' (in ' + labelOf_(r.ParentID) + ')' : ' (on the Floor)')).join(', ') + '.', true);
+  return null;
 }
 
 function pushNode(node) {
@@ -958,8 +965,9 @@ function pushNode(node) {
     session.push(node);
   }
   renderStack();
-  log('Added: ' + serialize(canonTree_(Array.isArray(node) ? node : [node])));
+  log(session.length ? added_(node) : 'Opened ' + labelOf_(anchor));
 }
+const added_ = node => 'Added ' + labelOf_(head(node)) + ' to ' + labelOf_(anchor);
 
 // Re-scanning or re-typing the open container never saves: only the Save button does.
 function alreadyOpen_() {
@@ -1069,7 +1077,7 @@ function onScan(raw) {
     saveHistory();
     openAnchor_(scannedHead, scannedChildren);
     renderStack();
-    log('OPEN: ' + canon_(scannedHead));
+    log('Opened ' + labelOf_(anchor));
   } else if (same_(scannedHead, anchor)) {
     alreadyOpen_();
   } else if (same_(scannedHead, 'floor')) {
@@ -1080,7 +1088,7 @@ function onScan(raw) {
     const node = scannedChildren.length > 0 && !index ? tree : scannedHead;
     session.push(node);
     renderStack();
-    log('Added: ' + serialize(canonTree_(Array.isArray(node)?node:[node])));
+    log(added_(node));
   }
 }
 
