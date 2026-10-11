@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="f0f10dbed12f69a66d85026143b2fda0306f504c">
+  <meta name="inventory-app-ref" content="e12720793e26381fc15be41a814df478f171cf32">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -553,6 +553,7 @@ function search_(rows, q, limit) {
 
 <div class="scan-actions">
 <button id="photo-btn" onclick="addPhoto_()" hidden>📷 Add photo</button>
+<button id="label-btn" onclick="printLabel_()" hidden>🏷 Print label</button>
 <button id="save-btn" onclick="doClose()" disabled>Save</button>
 <button onclick="undoLast()">Undo</button>
 <button onclick="clearStack()">Close without saving</button>
@@ -990,6 +991,7 @@ function renderStack() {
   const el = document.getElementById('stack-display');
   document.getElementById('new-row').hidden = !!anchor;
   document.getElementById('photo-btn').hidden = !anchor;
+  document.getElementById('label-btn').hidden = !anchor || pending_(); // after a save the label prints anyway
   const btn = document.getElementById('save-btn');
   btn.disabled = !pending_();
   btn.textContent = !pending_() ? 'Save' : session.length ? 'Save: ' + session.length + ' into ' + labelOf_(anchor) : 'Save ' + labelOf_(anchor);
@@ -1212,6 +1214,19 @@ async function doClose() {
     if (btChar) await sendPrint(payload, tree[0], tsHuman);
     else log('No printer — QR on screen only');
   }
+}
+
+// A label for what is open, without saving (e.g. an OUT sign for the wall).
+async function printLabel_() {
+  if (!anchor) return;
+  // A place's sign carries only its name; a bin's label carries what is inside.
+  const tree = isPlace_(anchor) ? [canon_(anchor)] : canonTree_([anchor, ...merge(priorState, [])]);
+  const payload = URL_PREFIX + serialize(tree);
+  const tsHuman = new Date().toLocaleString('en-US', { hour12: false });
+  document.getElementById('url-display').textContent = payload;
+  renderQRCanvas(payload, tree[0], tsHuman);
+  if (btChar) { await sendPrint(payload, tree[0], tsHuman); saveStatus_('ok', 'Label sent to the printer.'); }
+  else saveStatus_('ok', 'Label below: tap Share label to print it.');
 }
 
 function clearStack() {
