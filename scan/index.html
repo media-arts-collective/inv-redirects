@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="e12720793e26381fc15be41a814df478f171cf32">
+  <meta name="inventory-app-ref" content="30610e4b0a0fa7717950417d24996fe3a6394d2f">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -430,6 +430,8 @@
 
   /* ── Scan tab (ported from ScanScript) ───────────────────────────────── */
   #tab-scan { font-family: monospace; }
+  #tab-scan .list-head { display: flex; gap: 6px; align-items: flex-start; }
+  #tab-scan .list-head pre { flex: 1; min-width: 0; }
   #tab-scan .starts, #tab-scan .scan-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
   #tab-scan .starts button { margin: 0; }
   #tab-scan label { display: block; font-family: sans-serif; font-size: 14px; margin: 6px 0; }
@@ -548,19 +550,15 @@ function search_(rows, q, limit) {
 
 <input type="text" id="push-input" placeholder="Type a name or ID" enterkeyhint="go" onkeydown="onPushKey(event)">
 <div id="ask" class="scan-help" hidden><span id="ask-text"></span><br><span id="ask-btns"></span></div>
-<pre id="stack-display">—</pre>
+<div class="list-head"><pre id="stack-display">—</pre><button id="close-btn" onclick="clearStack()" hidden aria-label="Close without saving" title="Close without saving">✕</button></div>
 <div class="starts"><span id="new-row" hidden><button onclick="newBin_()">＋ New bin</button></span></div>
 
 <div class="scan-actions">
-<button id="photo-btn" onclick="addPhoto_()" hidden>📷 Add photo</button>
-<button id="label-btn" onclick="printLabel_()" hidden>🏷 Print label</button>
-<button id="save-btn" onclick="doClose()" disabled>Save</button>
+<button id="save-btn" onclick="pending_() ? doClose() : printLabel_()" disabled>Save</button>
+<button id="photo-btn" onclick="addPhoto_()" hidden>📷 Photo</button>
 <button onclick="undoLast()">Undo</button>
-<button onclick="clearStack()">Close without saving</button>
 </div>
 <div id="save-status" class="save-status" hidden></div>
-<label><input type="checkbox" id="use-photo"> Save camera view as its photo</label>
-<label id="confirm-print-row"><input type="checkbox" id="confirm-print" onchange="savePrefs()"> Ask before printing</label>
 
 <canvas id="qr-canvas"></canvas>
 <button id="share-btn" onclick="shareLabel()" hidden>Share label</button>
@@ -625,14 +623,6 @@ let carry       = null; // an item scanned with nothing open: it goes into the n
 const photos_   = {};   // key_(photo entry ID) -> its picture; Save sends it as that row's Photo
 const names_    = {};   // key_(new ID) -> the name typed for it (New bin, Make new); Save sends it as the Label
 
-// ── Prefs ─────────────────────────────────────────────────────────────────
-function loadPrefs() {
-  const confirm = localStorage.getItem('ss:confirm') === 'true';
-  document.getElementById('confirm-print').checked = confirm;
-}
-function savePrefs() {
-  localStorage.setItem('ss:confirm', document.getElementById('confirm-print').checked);
-}
 
 // ── Log ───────────────────────────────────────────────────────────────────
 function log(msg) {
@@ -991,10 +981,10 @@ function renderStack() {
   const el = document.getElementById('stack-display');
   document.getElementById('new-row').hidden = !!anchor;
   document.getElementById('photo-btn').hidden = !anchor;
-  document.getElementById('label-btn').hidden = !anchor || pending_(); // after a save the label prints anyway
+  document.getElementById('close-btn').hidden = !anchor;
   const btn = document.getElementById('save-btn');
-  btn.disabled = !pending_();
-  btn.textContent = !pending_() ? 'Save' : session.length ? 'Save: ' + session.length + ' into ' + labelOf_(anchor) : 'Save ' + labelOf_(anchor);
+  btn.hidden = !anchor;
+  btn.textContent = !pending_() ? (anchor ? 'Print label' : 'Save') : session.length ? 'Save: ' + session.length + ' into ' + labelOf_(anchor) : 'Save ' + labelOf_(anchor);
   if (!anchor) { el.textContent = '—'; return; }
   const tree = [anchor, ...merge(priorState, session)];
   const fresh = [...new Set(tree.flat(Infinity).map(String))].filter(id => index && !index[key_(id)] && !photos_[key_(id)]);
@@ -1171,8 +1161,7 @@ async function doClose() {
 
   saveStatus_('saving', 'Saving ' + name + '…');
   log('Saving: ' + scheme);
-  const photo = document.getElementById('use-photo').checked ? captureSnapshot_() : null;
-  document.getElementById('use-photo').checked = false;
+  const photo = null; // pictures are 📷 Photo entries now
   const moved = (sent.slice(1).filter(n => head(n) !== 't')).map(n => labelOf_(head(n)));
   const into  = 'in ' + labelOf_(same_(tree[0], 'floor') ? 'in' : tree[0]);
   anchor=null; priorState=[]; priorFrom=null; session=[]; history=[];
@@ -1208,12 +1197,8 @@ async function doClose() {
   document.getElementById('url-display').textContent = payload;
   renderQRCanvas(payload, tree[0], tsHuman);
 
-  const doPrint = !document.getElementById('confirm-print').checked ||
-    confirm('Print label for ' + tree[0] + '?');
-  if (doPrint) {
-    if (btChar) await sendPrint(payload, tree[0], tsHuman);
-    else log('No printer — QR on screen only');
-  }
+  if (btChar) await sendPrint(payload, tree[0], tsHuman);
+  else log('No printer — QR on screen only');
 }
 
 // A label for what is open, without saving (e.g. an OUT sign for the wall).
@@ -1477,9 +1462,7 @@ function initScan() {
   // iPhone browsers (Safari, Chrome) have no Web Bluetooth.
   if (!navigator.bluetooth) {
     document.getElementById('bt-row').hidden = true;
-    document.getElementById('confirm-print-row').hidden = true;
   }
-  loadPrefs();
   startCamera();
   bootFromHash();
   renderStack();
