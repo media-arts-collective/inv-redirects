@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="4ef3fe44eb6213894adcc2f1129d2f77ceb2392f">
+  <meta name="inventory-app-ref" content="cd65eea9a8a9c08d41d0707d4b9b0aa3b10037e7">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -789,7 +789,7 @@ let navStack = [];
 // write to the sheet for everyone.
 let editMode = false;
 function toggleEdit_() {
-  if (!editMode && !confirm('Edit the map? Dragging and the 🎨 ⟳ ⤢ buttons save straight to the sheet for everyone. ↶ Undo last move takes a change back.')) return;
+  if (!editMode && !confirm('Edit the map? Changes save for everyone.')) return;
   editMode = !editMode;
   document.getElementById('tab-browse').classList.toggle('editing', editMode);
   document.getElementById('edit-toggle').textContent = editMode
@@ -936,7 +936,7 @@ let loading_ = 0;
 function load_(what, params) {
   const n = document.getElementById('load-note');
   loading_++;
-  n.textContent = 'Loading ' + what + '… (on a weak signal this can take several seconds)'; n.hidden = false;
+  n.textContent = 'Loading ' + what + '…'; n.hidden = false;
   const done = () => { if (--loading_ === 0) n.hidden = true; };
   return get_(params).then(v => { done(); return v; }, err => { done(); throw err; });
 }
@@ -1334,7 +1334,7 @@ function renderTopDown(bin, v) {
     container.appendChild(grid);
 
     if (!children || children.length === 0) {
-      grid.insertAdjacentHTML('beforeend', '<p class="map-empty">Empty: nothing has been scanned into ' + esc_(bin.Label || bin.ID) + ' yet.</p>');
+      grid.insertAdjacentHTML('beforeend', '<p class="map-empty">Empty.</p>');
       showHere_();
       return;
     }
@@ -1497,7 +1497,7 @@ function showToolbar_() {
 function showDetails_(o, d, err) {
   const el = document.getElementById('details');
   if (!el || selectedItem !== o) return;
-  if (o.Virtual) { el.textContent = (o.Label || o.ID) + ' is not a spot on the floor. Scan files gear into it like a bin, so it can be found here.'; return; }
+  if (o.Virtual) { el.textContent = 'Not on the floor. Scan gear into it like a bin.'; return; }
   if (!d) { el.textContent = err ? 'Details failed to load: ' + err : 'Not in the sheet.'; return; }
   const row = (k, v) => v ? '<div><b>' + k + ':</b> ' + esc_(v) + '</div>' : '';
   const photo = /^https?:\/\//.test(d.Photo) ? '<div><a href="' + esc_(d.Photo) + '" target="_blank">📷 Photo</a></div>'
@@ -1561,7 +1561,7 @@ function withIndex_(cb) {
     indexP.catch(() => { indexP = null; });
   }
   indexP.then(cb, err => {
-    document.getElementById('find-results').textContent = 'Search failed to load: ' + err.message + '. Check your connection, then try again.';
+    document.getElementById('find-results').textContent = 'Search failed to load. Check your connection.';
   });
 }
 
@@ -1652,7 +1652,7 @@ function note_(msg) {
      /exec URL (fetch, not google.script.run) so the same BugReports API
      in src/Bugs.gs could later be called from anywhere, not just this tab. -->
 <div class="edit-form">
-  <h2>Report a bug or idea</h2>
+  <h2>Report a problem or idea</h2>
 
   <!-- Proof-of-life that the tracker is actually tended: the last
        bug-sweep / nightly-batch run, read from ?scope=sweep-status (see
@@ -1673,7 +1673,7 @@ function note_(msg) {
   <label for="report-description">Details</label>
   <textarea id="report-description" rows="5" required></textarea>
 
-  <p class="sweep-status">Reports are saved with the inventory. Whoever looks after the app turns them into tasks the next time they check, which is not on a schedule, so nobody is alerted straight away. Reports are not private: anyone who has the app's address can read them, so leave out anything private. Urgent? Krewe members can email the Virtual Krewe of Vaporwave mailing list: <a href="mailto:kreweofvaporwave@googlegroups.com">kreweofvaporwave@googlegroups.com</a> (it only accepts mail from members).</p>
+  <p class="sweep-status">Reports are public.</p>
 
   <label for="report-name">Your name (optional)</label>
   <input type="text" id="report-name" maxlength="40">
@@ -1749,8 +1749,7 @@ function note_(msg) {
       .then(function (r) {
         if (!r.ok) {
           if (r.status === 401 || r.status === 403) {
-            throw new Error('locked:The tracker is locked down right now (HTTP ' + r.status +
-              ') — your report was NOT saved, and retrying won’t help. Krewe members can email the mailing list instead (members only): kreweofvaporwave@googlegroups.com');
+            throw new Error('locked:Not saved: reports are switched off (HTTP ' + r.status + '). Email kreweofvaporwave@googlegroups.com instead.');
           }
           throw new Error('http:The server rejected the report (HTTP ' + r.status + '). Try again in a moment.');
         }
