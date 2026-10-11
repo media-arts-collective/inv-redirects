@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="3fa1008c6b40d93cdcfe325b21eb9f5723ee5df1">
+  <meta name="inventory-app-ref" content="f0305b669f599e3dd853130172a1583f3a959d2b">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -870,10 +870,15 @@ function onPushKey(e) {
   const val = document.getElementById('push-input').value.trim().toUpperCase();
   if (!val) return;
   document.getElementById('push-input').value = '';
-  pushNode(val.startsWith('(') ? parse(val) : val);
+  if (val.startsWith('(')) { pushNode(parse(val)); return; }
+  // The server splits on whitespace, so "POWER STRIP" would save as two items.
+  pushNode(val.replace(/\s+/g, '_'));
 }
 
 function pushNode(node) {
+  // Typing the anchor again closes, same as re-scanning its label; pushing it
+  // would make the anchor its own parent and drop it off the floor map.
+  if (anchor && node === anchor) { doClose(); return; }
   saveHistory();
   if (!anchor) {
     anchor = head(node);
