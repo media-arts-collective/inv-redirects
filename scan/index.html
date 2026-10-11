@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="1b2fbb8afe89ab6225abf661e1848ad954c7e7f4">
+  <meta name="inventory-app-ref" content="3d8361304eb4bb1733d08a7fd6c61bd4370d0cca">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -281,6 +281,12 @@
   .find { padding: 0.5rem 1rem 0; background: #000; }
   .find input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 0.5rem; }
   #find-results { color: #888; }
+  .guide-link { display: inline-block; margin-top: 0.4rem; color: cyan; font-size: 14px; }
+  .guide { max-width: 42rem; margin: 0 auto; padding: 1rem; line-height: 1.5; }
+  .guide a { color: cyan; }
+  .guide table { border-collapse: collapse; width: 100%; }
+  .guide th, .guide td { border: 1px solid #444; padding: 0.3rem 0.5rem; text-align: left; vertical-align: top; }
+  .guide blockquote { margin: 0; padding-left: 0.8rem; border-left: 3px solid cyan; opacity: 0.85; }
   #find-results button { display: block; width: 100%; text-align: left; margin-top: 4px; padding: 0.5rem; font-size: 15px; }
   .load-note { margin: 0; padding: 0.4rem 1rem; color: #0ff; font-size: 15px; }
   .find-note { margin: 0; padding: 0.4rem 1rem; color: #ff0; background: #000; font-size: 15px; }
@@ -482,7 +488,7 @@
      instead of POSTing to a local /log file. -->
 
 <b>Scan</b> — <span id="bt-status">printer not connected</span> <button onclick="toggleBT()" id="bt-btn">Connect Printer</button>
-<p class="scan-help">Scan a bin, scan each thing you put in it, then press Save. Checking gear out works the same way: scan the bin it is going out in, or start a new one with ＋ New bin.</p>
+<p class="scan-help">Scan a bin, scan each thing you put in it, then press Save. Checking gear out works the same way: scan the bin it is going out in, or start a new one with ＋ New bin. <a href="/guide/">📖 Guide</a></p>
 <p id="cam-msg" class="save-status err" hidden></p>
 
 <div id="camera-wrap">

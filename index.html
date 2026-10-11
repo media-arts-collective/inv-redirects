@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="1b2fbb8afe89ab6225abf661e1848ad954c7e7f4">
+  <meta name="inventory-app-ref" content="3d8361304eb4bb1733d08a7fd6c61bd4370d0cca">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -281,6 +281,12 @@
   .find { padding: 0.5rem 1rem 0; background: #000; }
   .find input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 0.5rem; }
   #find-results { color: #888; }
+  .guide-link { display: inline-block; margin-top: 0.4rem; color: cyan; font-size: 14px; }
+  .guide { max-width: 42rem; margin: 0 auto; padding: 1rem; line-height: 1.5; }
+  .guide a { color: cyan; }
+  .guide table { border-collapse: collapse; width: 100%; }
+  .guide th, .guide td { border: 1px solid #444; padding: 0.3rem 0.5rem; text-align: left; vertical-align: top; }
+  .guide blockquote { margin: 0; padding-left: 0.8rem; border-left: 3px solid cyan; opacity: 0.85; }
   #find-results button { display: block; width: 100%; text-align: left; margin-top: 4px; padding: 0.5rem; font-size: 15px; }
   .load-note { margin: 0; padding: 0.4rem 1rem; color: #0ff; font-size: 15px; }
   .find-note { margin: 0; padding: 0.4rem 1rem; color: #ff0; background: #000; font-size: 15px; }
@@ -572,6 +578,7 @@ function switchTab(name) {
 <div class="find">
   <input id="find-input" type="search" placeholder="🔍 Find gear by name or ID" autocomplete="off" oninput="findGear_(this.value)" onfocus="withIndex_(() => {})">
   <div id="find-results"></div>
+  <a class="guide-link" href="https://inv.kreweofvaporwave.com/guide/" target="_top">📖 How to use this app</a>
 </div>
 <nav class="crumbs" id="crumbs"></nav>
 <p id="load-note" class="load-note" hidden></p>
