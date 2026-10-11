@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="2b43c4e7e7450a931b2a47df2a3c088dbbbff9f8">
+  <meta name="inventory-app-ref" content="ecc375150a7993e39503f9ce503e1a65f1dc996e">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -742,11 +742,18 @@ function toggleEdit_() {
   if (selectedItem) showToolbar_();
 }
 // Each map edit's previous values, newest last; undo writes them back the same way.
+// The last one is kept in sessionStorage, so a reload can still take it back.
 const undo_ = [];
+try { const u = JSON.parse(sessionStorage.getItem('inv:undo')); if (u) undo_.push({ o: { ID: u.id }, prev: u.prev }); } catch (_) {}
+function keepUndo_() {
+  const u = undo_[undo_.length - 1];
+  try { u ? sessionStorage.setItem('inv:undo', JSON.stringify({ id: u.o.ID, prev: u.prev })) : sessionStorage.removeItem('inv:undo'); } catch (_) {}
+}
 function showUndo_() { document.getElementById('undo-edit').hidden = !editMode || !undo_.length; }
 function undoEdit_() {
   const u = undo_.pop();
   if (!u) return;
+  keepUndo_();
   Object.assign(u.o, u.prev);
   showUndo_();
   post_(u.o.ID, u.prev, 'Undo').then(renderCurrentView);
@@ -787,6 +794,7 @@ function drillInto(o) {
 let view_ = 0;
 function renderCurrentView() {
   syncUrl_();
+  about_();
   renderCrumbs();
   clearMap_();
   const v = ++view_;
@@ -871,7 +879,7 @@ let loading_ = 0;
 function load_(what, params) {
   const n = document.getElementById('load-note');
   loading_++;
-  n.textContent = 'Loading ' + what + '…'; n.hidden = false;
+  n.textContent = 'Loading ' + what + '… (on a weak signal this can take several seconds)'; n.hidden = false;
   const done = () => { if (--loading_ === 0) n.hidden = true; };
   return get_(params).then(v => { done(); return v; }, err => { done(); throw err; });
 }
@@ -883,6 +891,7 @@ function post_(id, fields, what) {
 // A map edit: remembered for ↶ Undo last move, applied to o, saved.
 function save_(o, fields, what) {
   undo_.push({ o, prev: Object.fromEntries(Object.keys(fields).map(k => [k, o[k]])) });
+  keepUndo_();
   Object.assign(o, fields);
   showUndo_();
   return post_(o.ID, fields, what);
@@ -1387,6 +1396,7 @@ function selectItem_(o, level, el) {
   document.querySelectorAll('.selected').forEach(n => n.classList.remove('selected'));
   if (el) el.classList.add('selected');
   showToolbar_();
+  about_();
 }
 
 function hideToolbar() {
@@ -1396,6 +1406,15 @@ function hideToolbar() {
   bar.hidden = true;
   bar.innerHTML = '';
   document.querySelectorAll('.selected').forEach(n => n.classList.remove('selected'));
+  about_();
+}
+
+// The Report form says, and sends, which item Browse has selected or open.
+function about_() {
+  window._currentCard = selectedItem || navStack[navStack.length - 1] || null;
+  const o = window._currentCard;
+  document.getElementById('report-about').hidden = !o;
+  document.getElementById('report-about-name').textContent = o ? (o.Label ? o.Label + ' · ' : '') + String(o.ID).trim() : '';
 }
 
 const esc_ = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';');
@@ -1496,7 +1515,7 @@ const idKey_ = v => String(v || '').trim().toLowerCase().replace(/[\s_-]+/g, '-'
 function findGear_(q) {
   const box = document.getElementById('find-results');
   q = q.trim();
-  if (q.length < 2) { box.innerHTML = ''; return; }
+  if (q.length < 2) { box.textContent = q ? 'Type one more letter.' : ''; return; }
   withIndex_(rows => {
     const byId = indexById_(rows);
     const hits = rows.filter(r => idKey_(r.Label + ' ' + r.ID).includes(idKey_(q))).slice(0, 15);
@@ -1591,6 +1610,8 @@ function note_(msg) {
   <label>
     <input type="radio" name="report-kind" value="feature"> I have an idea
   </label>
+
+  <p id="report-about" hidden>About: <b id="report-about-name"></b> <button onclick="window._currentCard = null; this.parentNode.hidden = true;">✕ not about this</button></p>
 
   <label for="report-description">Details</label>
   <textarea id="report-description" rows="5" required></textarea>

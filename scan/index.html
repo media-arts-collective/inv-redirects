@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="2b43c4e7e7450a931b2a47df2a3c088dbbbff9f8">
+  <meta name="inventory-app-ref" content="ecc375150a7993e39503f9ce503e1a65f1dc996e">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -508,17 +508,14 @@
 <button id="share-btn" onclick="shareLabel()" hidden>Share label</button>
 
 <details style="margin-top:1rem;font-size:0.85em;color:#999;">
-  <summary style="cursor:pointer;">What the app did (for fixing problems)</summary>
+  <summary style="cursor:pointer;">Advanced: what the app did (for fixing problems), 3D Pixel Cube</summary>
   <b>Last saved:</b>
   <pre id="closure">—</pre>
   <b>Label link:</b>
   <pre id="url-display">—</pre>
   <b>Log:</b>
   <pre id="log"></pre>
-</details>
-
-<details style="margin-top:1rem;font-size:0.85em;color:#999;">
-  <summary style="cursor:pointer;">📸 3D Pixel Cube (experimental)</summary>
+  <b>📸 3D Pixel Cube (experimental):</b>
   <div style="margin-top:6px;">
     Snap top/left/right photos of an item and render them into an isometric
     cube sprite, entirely on-device (no upload to any service). Aesthetic is
@@ -566,6 +563,8 @@ let priorFrom   = null; // 'sheet' | 'label'
 let session     = [];   // nodes pushed this session
 let history     = [];   // undo stack: [{anchor, priorState, priorFrom, session}]
 let lastScanId  = null; // for trivial double-scan detection
+let carry       = null; // an item scanned with nothing open: it goes into the next bin opened
+const names_    = {};   // key_(new ID) -> the name typed for it (New bin, Make new); Save sends it as the Label
 
 // ── Prefs ─────────────────────────────────────────────────────────────────
 function loadPrefs() {
@@ -592,8 +591,8 @@ function postToServer_(body) {
   }).then(r => r.json());
 }
 
-function commitToServer(scheme, photo) {
-  return postToServer_({ type: 'scan', scheme, photo })
+function commitToServer(scheme, photo, labels) {
+  return postToServer_({ type: 'scan', scheme, photo, labels })
     .then(res => res && res.ok ? null : (res && res.error) || 'no answer')
     .catch(err => 'connection: ' + err.message);
 }
@@ -635,8 +634,7 @@ function priorFromSheet_() {
   return true;
 }
 function openAnchor_(id, labelChildren) {
-  anchor = id; session = []; hideAsk_();
-  if (document.getElementById('save-status').classList.contains('saving')) document.getElementById('save-status').hidden = true;
+  anchor = id; session = []; changed_();
   if (!priorFromSheet_()) { priorState = labelChildren; priorFrom = labelChildren.length ? 'label' : null; }
   loadIndex_(); // someone may have moved things since the page loaded
 }
@@ -657,7 +655,7 @@ function freshId_(name) {
   for (let n = 2; index && index[key_(id)]; n++) id = base + '-' + n;
   return id;
 }
-const labelOf_ = id => (index && index[key_(id)] && index[key_(id)].Label) || canon_(id);
+const labelOf_ = id => (index && index[key_(id)] && index[key_(id)].Label) || names_[key_(id)] || canon_(id);
 // Where an added thing is recorded now, if that is somewhere else: Save moves it from there.
 function from_(n) {
   const r = index && index[key_(head(n))];
@@ -669,7 +667,8 @@ const pending_ = () => !!anchor && (session.length > 0 || (priorFrom === 'label'
 function nameOf_(node) {
   const id = canon_(head(node)), r = index && index[key_(id)];
   const inside = Array.isArray(node) && node.length > 1 ? ' (+' + (node.length - 1) + ' inside)' : '';
-  return (r && r.Label ? r.Label + ' · ' + id : id) + (index && !r ? '  ★ NEW' : '') + inside;
+  const label = (r && r.Label) || (!r && names_[key_(id)]);
+  return (label ? label + ' · ' + id : id) + (index && !r ? '  ★ NEW' : '') + inside;
 }
 
 // Snapshot the live camera feed once, at close time -- not per individual
@@ -969,7 +968,7 @@ function undoLast() {
   if (!history.length) { log('Nothing to undo'); return; }
   const prev = history.pop();
   anchor=prev.anchor; priorState=prev.priorState; priorFrom=prev.priorFrom; session=prev.session;
-  renderStack(); log('Undo');
+  carry=null; changed_(); renderStack(); log('Undo');
 }
 
 // ── Questions: a container while another is open, or a typed name ─────────
@@ -989,6 +988,11 @@ function ask_(about, text, choices) {
   document.getElementById('ask').scrollIntoView({ block: 'center' });
 }
 function hideAsk_() { askedFor = null; document.getElementById('ask').hidden = true; }
+// The list or the open container changed: old questions and "already open" no longer apply.
+function changed_() {
+  hideAsk_();
+  if (document.getElementById('save-status').classList.contains('saving')) document.getElementById('save-status').hidden = true;
+}
 
 // A container scanned or typed while another is open: put it in, or open it instead.
 function askSwitch_(id, labelChildren) {
@@ -998,7 +1002,7 @@ function askSwitch_(id, labelChildren) {
   const choices = [];
   if (!(index[key_(id)] || {}).Virtual) choices.push(['Put ' + name + ' into ' + open, () => addNode_(id)]);
   choices.push(['Open ' + name + ' instead' + (unsaved ? ' (drops ' + unsaved + ' unsaved)' : ''), () => {
-    saveHistory(); openAnchor_(id, labelChildren); renderStack(); log('Opened ' + name);
+    carry = null; open_(id, labelChildren);
   }]);
   ask_(id, name + ' is a container. ' + (choices.length > 1 ? 'Put it into ' + open + ', or open it instead?' : 'Open it instead of ' + open + '?') +
     (unsaved ? ' Opening it drops the ' + unsaved + ' not yet saved into ' + open + ' (Undo brings them back).' : ''), choices);
@@ -1026,7 +1030,7 @@ function lookup_(val) {
   const where = r => r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor';
   const choices = hits.map(r => [(r.Label ? r.Label + ' · ' : '') + String(r.ID).trim() + ' (' + where(r) + ')', () => pushNode(String(r.ID).trim())]);
   const id = freshId_(val);
-  if (!exact.length && id) choices.push(['Make new: ' + id, () => pushNode(id)]);
+  if (!exact.length && id) choices.push(['Make new: ' + id, () => { names_[key_(id)] = val; pushNode(id); }]);
   const twins = hits.map(shares).filter(s => s.length > 1)[0];
   ask_(null, (exact.length ? (exact.length > 1 ? '“' + val + '” is the name of ' + exact.length + ' things. Which one?' : 'Found “' + val + '”.')
                            : hits.length ? 'Nothing is called exactly “' + val + '”. Did you mean one of these?'
@@ -1039,7 +1043,9 @@ function newBin_() {
   const name = prompt('Name for the new bin:');
   if (!name) return;
   const id = freshId_(name);
-  if (id) pushNode(id);
+  if (!id) return;
+  names_[key_(id)] = name.trim();
+  pushNode(id);
 }
 
 function pushNode(node) {
@@ -1047,15 +1053,42 @@ function pushNode(node) {
   if (anchor && !Array.isArray(node) && isBox_(node)) { askSwitch_(node, []); return; }
   if (anchor && same_(head(node), 'floor')) { log('The Floor cannot go inside anything.'); return; }
   if (anchor) { addNode_(node); return; }
+  start_(head(node), Array.isArray(node) ? node.slice(1) : []);
+}
+
+// Nothing open: a container opens; a plain item asks which bin it is going into.
+function start_(id, labelChildren) {
+  if (!labelChildren.length && index && index[key_(id)] && !isBox_(id)) askBin_(id);
+  else open_(id, labelChildren);
+}
+function open_(id, labelChildren) {
   saveHistory();
-  openAnchor_(head(node), Array.isArray(node) ? node.slice(1) : []);
+  openAnchor_(id, labelChildren);
   renderStack();
   log('Opened ' + labelOf_(anchor));
+  remember_(anchor);
+  if (carry) { const c = carry; carry = null; if (!same_(c, anchor)) addNode_(c); }
+}
+// Bins opened lately, newest first: the choices offered for an item scanned first.
+function recent_() { try { return JSON.parse(localStorage.getItem('ss:recent')) || []; } catch (_) { return []; } }
+function remember_(id) {
+  try { localStorage.setItem('ss:recent', JSON.stringify([id, ...recent_().filter(b => !same_(b, id))].slice(0, 5))); } catch (_) {}
+}
+function askBin_(id) {
+  if (same_(askedFor, id)) return; // the camera re-reads a label every 2 s
+  const r = index[key_(id)], name = labelOf_(id);
+  carry = String(r.ID).trim();
+  const bins = [...recent_(), r.ParentID].filter((b, i, a) => b && isBox_(b) && a.findIndex(x => same_(x, b)) === i).slice(0, 4);
+  ask_(id, name + ' is ' + (r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor') + '. Scan or pick the bin it is going into first.',
+    [...bins.map(b => [labelOf_(b), () => open_(canon_(b), [])]),
+     ['＋ New bin', newBin_],
+     ['Use ' + name + ' as a bin', () => { carry = null; open_(String(r.ID).trim(), []); }]]);
 }
 function addNode_(node) {
   if (session.some(n => same_(head(n), head(node)))) { log(labelOf_(head(node)) + ' is already on the list'); return; }
   saveHistory();
   session.push(node);
+  changed_();
   renderStack();
   log(added_(node));
 }
@@ -1092,7 +1125,9 @@ async function doClose() {
   lastScanId=null; hideAsk_();
   renderStack();
 
-  const err = await commitToServer(scheme, photo);
+  const labels = {};
+  sent.flat(Infinity).forEach(id => { if (names_[key_(id)] && !(index && index[key_(id)])) labels[key_(id)] = names_[key_(id)]; });
+  const err = await commitToServer(scheme, photo, labels);
   if (err) {
     log('NOT saved: ' + err);
     // Put the list back so Save can simply be pressed again.
@@ -1130,7 +1165,7 @@ function clearStack() {
   if (unsaved && !confirm('Drop the ' + unsaved + ' not yet saved into ' + labelOf_(anchor) + '?')) return;
   saveHistory();
   anchor=null; priorState=[]; priorFrom=null; session=[];
-  lastScanId=null; hideAsk_();
+  lastScanId=null; carry=null; hideAsk_();
   document.getElementById('save-status').hidden = true;
   renderStack();
   log('Closed without saving');
@@ -1169,10 +1204,7 @@ function onScan(raw) {
   log('SCAN: ' + str.slice(0,60));
 
   if (!anchor) {
-    saveHistory();
-    openAnchor_(scannedHead, scannedChildren);
-    renderStack();
-    log('Opened ' + labelOf_(anchor));
+    start_(scannedHead, scannedChildren);
   } else if (same_(scannedHead, anchor)) {
     alreadyOpen_();
   } else if (index && (scannedChildren.length > 0 || isBox_(scannedHead))) {
