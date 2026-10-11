@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="f75d4c529689f9bce50ca5c617f39f699cf66207">
+  <meta name="inventory-app-ref" content="f0f10dbed12f69a66d85026143b2fda0306f504c">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -1485,6 +1485,7 @@ function showToolbar_() {
   bar.innerHTML =
     '<strong>' + esc_(o.Label || o.ID) + '</strong>' +
     (editMode ? '<button onclick="cycleIcon_()">🎨 Icon</button>' : '') +
+    (editMode && !o.Virtual ? ['in', 'out'].filter(p => idKey_(o.ParentID) !== p).map(p => '<button onclick="moveTo_(\'' + p + '\')">Move to ' + (p === 'in' ? 'In' : 'Out') + '</button>').join('') : '') +
     (editMode && selectedLevel === 'iso-root'
       ? '<button onclick="toggleRotate_()">⟳ Rotate</button><button onclick="cycleSize_()">⤢ Size</button>'
       : '') +
@@ -1507,6 +1508,15 @@ function showDetails_(o, d, err) {
   el.innerHTML = '<div><b>ID:</b> ' + esc_(o.ID) + '</div>' + row('Description', d.Description) +
     row('Category', d.Category) + row('Comments', d.Comments) + row('Last updated', d.Timestamp) + photo +
     (d.Inside ? '<div>' + d.Inside + ' thing' + (d.Inside === 1 ? '' : 's') + ' recorded inside.</div>' : '');
+}
+
+// Check a thing out or back in without the Scan tab (Edit map on). Undo last move takes it back.
+function moveTo_(place) {
+  if (!selectedItem) return;
+  save_(selectedItem, { ParentID: place }, 'Move');
+  indexP = null; // the search list now has a stale parent
+  hideToolbar();
+  renderCurrentView();
 }
 
 function drillIntoSelected_() {

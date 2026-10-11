@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="f75d4c529689f9bce50ca5c617f39f699cf66207">
+  <meta name="inventory-app-ref" content="f0f10dbed12f69a66d85026143b2fda0306f504c">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -699,6 +699,7 @@ function openAnchor_(id, labelChildren) {
 // Same rule as Browse's isContainer_: something is inside it, its Container
 // Style is a box kind, or it is a top-level place (no parent, or in In/Out; no style).
 const BOX_STYLE_ = /crate|bin|box|shelf|stack|road-case/;
+const isPlace_ = id => same_(id, 'floor') || !!(index && index[key_(id)] && index[key_(id)].Virtual);
 function isBox_(id) {
   const r = index && index[key_(id)];
   if (!r) return false;
@@ -1090,7 +1091,8 @@ function newBin_() {
 
 function pushNode(node) {
   if (anchor && !Array.isArray(node) && same_(node, anchor)) { alreadyOpen_(); return; }
-  if (anchor && !Array.isArray(node) && isBox_(node)) { askSwitch_(node, []); return; }
+  // Into a place (In, Out, Lost…) a bin just goes in; only bin-into-bin asks Put or Open.
+  if (anchor && !Array.isArray(node) && isBox_(node) && !isPlace_(anchor)) { askSwitch_(node, []); return; }
   if (anchor && same_(head(node), 'floor')) { log('The Floor cannot go inside anything.'); return; }
   if (anchor) { addNode_(node); return; }
   start_(head(node), Array.isArray(node) ? node.slice(1) : []);
