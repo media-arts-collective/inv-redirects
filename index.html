@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="14abde75beed04aed4e9ecc3131cb88feb77386c">
+  <meta name="inventory-app-ref" content="2b43c4e7e7450a931b2a47df2a3c088dbbbff9f8">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -261,6 +261,7 @@
     border-radius: 10px;
     padding: 1px 6px;
     z-index: 10;
+    white-space: nowrap;
   }
   .map-empty { color: #888; font-size: 1.2em; text-align: center; }
 
@@ -285,6 +286,9 @@
   .find-note { margin: 0; padding: 0.4rem 1rem; color: #ff0; background: #000; font-size: 15px; }
   .floor-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 1rem 1rem; }
   .floor-list button { font-size: 15px; padding: 0.4rem 0.7rem; }
+  .floor-list span { flex-basis: 100%; color: #ccc; font-size: 14px; font-family: sans-serif; }
+  /* Room to scroll the outlined item above the details panel. */
+  body:has(.edit-toolbar:not([hidden])) { padding-bottom: 50vh; }
   .found { outline: 3px solid #ff0 !important; outline-offset: 2px; }
   .crumbs a:hover { text-decoration: underline; }
 
@@ -578,6 +582,7 @@ function switchTab(name) {
 </section>
 <!-- Below the map, away from the search box: it changes the map for everyone. -->
 <button id="edit-toggle" class="edit-toggle" onclick="toggleEdit_()">✏️ Edit map</button>
+<button id="undo-edit" class="edit-toggle" onclick="undoEdit_()" hidden>↶ Undo last move</button>
 <div class="edit-toolbar" id="edit-toolbar" hidden></div>
 
 <script>
@@ -727,13 +732,24 @@ let navStack = [];
 // write to the sheet for everyone.
 let editMode = false;
 function toggleEdit_() {
-  if (!editMode && !confirm('Edit the map? Dragging and the 🎨 ⟳ ⤢ buttons save straight to the sheet for everyone, with no undo.')) return;
+  if (!editMode && !confirm('Edit the map? Dragging and the 🎨 ⟳ ⤢ buttons save straight to the sheet for everyone. ↶ Undo last move takes a change back.')) return;
   editMode = !editMode;
   document.getElementById('tab-browse').classList.toggle('editing', editMode);
   document.getElementById('edit-toggle').textContent = editMode
     ? '✏️ Editing: dragging and 🎨⟳⤢ save for everyone. Tap to stop.'
     : '✏️ Edit map';
+  showUndo_();
   if (selectedItem) showToolbar_();
+}
+// Each map edit's previous values, newest last; undo writes them back the same way.
+const undo_ = [];
+function showUndo_() { document.getElementById('undo-edit').hidden = !editMode || !undo_.length; }
+function undoEdit_() {
+  const u = undo_.pop();
+  if (!u) return;
+  Object.assign(u.o, u.prev);
+  showUndo_();
+  post_(u.o.ID, u.prev, 'Undo').then(renderCurrentView);
 }
 let selectedItem = null;
 let selectedLevel = null;
@@ -859,10 +875,17 @@ function load_(what, params) {
   const done = () => { if (--loading_ === 0) n.hidden = true; };
   return get_(params).then(v => { done(); return v; }, err => { done(); throw err; });
 }
-function save_(id, fields, what) {
-  fetch(BASE_URL, { method: 'POST', body: JSON.stringify({ type: 'update', id, fields }) })
+function post_(id, fields, what) {
+  return fetch(BASE_URL, { method: 'POST', body: JSON.stringify({ type: 'update', id, fields }) })
     .then(r => r.json())
     .catch(err => alert(what + ' failed: ' + err.message));
+}
+// A map edit: remembered for ↶ Undo last move, applied to o, saved.
+function save_(o, fields, what) {
+  undo_.push({ o, prev: Object.fromEntries(Object.keys(fields).map(k => [k, o[k]])) });
+  Object.assign(o, fields);
+  showUndo_();
+  return post_(o.ID, fields, what);
 }
 
 function renderIsoRoot(v) {
@@ -891,7 +914,8 @@ function renderIsoRoot(v) {
     // The map's names are hover titles, and phones have no hover.
     const list = document.getElementById('floor-list');
     list.innerHTML = '';
-    (roots || []).forEach(o => {
+    (roots || []).forEach((o, i, all) => {
+      if (o.Virtual && !(all[i - 1] || {}).Virtual) list.insertAdjacentHTML('beforeend', '<span>Not on the floor:</span>');
       const b = document.createElement('button');
       b.textContent = o.Label || o.ID;
       b.onclick = () => openRow_(o);
@@ -973,7 +997,7 @@ function renderIsoRoot(v) {
       if (total > drawn) {
         const badge = document.createElement('span');
         badge.className = 'stack-badge';
-        badge.textContent = '+' + (total - drawn);
+        badge.textContent = (total - 1) + ' inside';
         wrap.appendChild(badge);
       }
 
@@ -1047,12 +1071,10 @@ function makeDraggableIso_(wrap, o, roots) {
       return;
     }
 
-    o.MapX = targetX;
-    o.MapY = targetY;
+    save_(o, { MapX: targetX, MapY: targetY }, 'Position save');
     wrap.style.setProperty('--x', o.MapX);
     wrap.style.setProperty('--y', o.MapY);
     landOn_(wrap);
-    save_(o.ID, { MapX: o.MapX, MapY: o.MapY }, 'Position save');
   }
 
   wrap.addEventListener('pointerdown', e => {
@@ -1133,14 +1155,14 @@ function renderFrontShelf(shelf, v) {
       label.textContent = child.Label || child.ID;
       slot.appendChild(label);
 
-      // Reuses the iso-root pile's own "+N" badge styling to answer "is
+      // Reuses the iso-root pile's own "N inside" badge styling to answer "is
       // there more inside this one?" without opening it -- there's no
       // capacity/fullness field to show a percentage against, but a real
       // child count, always accurate, costs nothing new to derive.
       if (Number(child.ChildCount || 0) > 0) {
         const badge = document.createElement('span');
         badge.className = 'stack-badge';
-        badge.textContent = child.ChildCount;
+        badge.textContent = child.ChildCount + ' inside';
         slot.appendChild(badge);
       }
 
@@ -1190,10 +1212,9 @@ function makeDraggableShelfSlot_(slot, o, siblings) {
     const blocked = siblings.some(s => s.ID !== o.ID && Number(s.MapX || 0) === target);
     if (blocked) { slot.style.setProperty('--slot', startSlot); return; }
 
-    o.MapX = target;
+    save_(o, { MapX: target }, 'Position save');
     slot.style.setProperty('--slot', target);
     landOn_(slot);
-    save_(o.ID, { MapX: target }, 'Position save');
   }
 
   slot.addEventListener('pointerdown', e => {
@@ -1275,7 +1296,7 @@ function renderTopDown(bin, v) {
       if (Number(child.ChildCount || 0) > 0) {
         const badge = document.createElement('span');
         badge.className = 'stack-badge';
-        badge.textContent = child.ChildCount;
+        badge.textContent = child.ChildCount + ' inside';
         cell.appendChild(badge);
       }
 
@@ -1335,11 +1356,10 @@ function makeDraggableGridCell_(cell, o, siblings) {
       return;
     }
 
-    o.MapX = tCol; o.MapY = tRow;
+    save_(o, { MapX: tCol, MapY: tRow }, 'Position save');
     cell.style.setProperty('--col', tCol);
     cell.style.setProperty('--row', tRow);
     landOn_(cell);
-    save_(o.ID, { MapX: tCol, MapY: tRow }, 'Position save');
   }
 
   cell.addEventListener('pointerdown', e => {
@@ -1401,13 +1421,14 @@ function showToolbar_() {
 function showDetails_(o, d, err) {
   const el = document.getElementById('details');
   if (!el || selectedItem !== o) return;
+  if (o.Virtual) { el.textContent = (o.Label || o.ID) + ' is not a spot on the floor. Scan files gear into it like a bin, so it can be found here.'; return; }
   if (!d) { el.textContent = err ? 'Details failed to load: ' + err : 'Not in the sheet.'; return; }
   const row = (k, v) => v ? '<div><b>' + k + ':</b> ' + esc_(v) + '</div>' : '';
   const photo = /^https?:\/\//.test(d.Photo) ? '<div><a href="' + esc_(d.Photo) + '" target="_blank">📷 Photo</a></div>'
     : /^data:image\//.test(d.Photo) ? '<img class="details-photo" src="' + esc_(d.Photo) + '">' : '';
   el.innerHTML = '<div><b>ID:</b> ' + esc_(o.ID) + '</div>' + row('Description', d.Description) +
     row('Category', d.Category) + row('Comments', d.Comments) + row('Last updated', d.Timestamp) + photo +
-    '<div>' + (d.Inside ? d.Inside + ' thing' + (d.Inside === 1 ? '' : 's') + ' recorded inside.' : 'Nothing recorded inside it.') + '</div>';
+    (d.Inside ? '<div>' + d.Inside + ' thing' + (d.Inside === 1 ? '' : 's') + ' recorded inside.</div>' : '');
 }
 
 function drillIntoSelected_() {
@@ -1423,16 +1444,14 @@ function cycleIcon_() {
   const cur = resolvedStyleKey_(selectedItem);
   const idx = styles.indexOf(cur);
   const next = styles[(idx + 1) % styles.length];
-  selectedItem['Container Style'] = next;
-  save_(selectedItem.ID, { 'Container Style': next }, 'Save');
+  save_(selectedItem, { 'Container Style': next }, 'Save');
   renderCurrentView();
 }
 
 function toggleRotate_() {
   if (!selectedItem) return;
   const w = Number(selectedItem.MapW || 1), d = Number(selectedItem.MapD || 1);
-  selectedItem.MapW = d; selectedItem.MapD = w;
-  save_(selectedItem.ID, { MapW: selectedItem.MapW, MapD: selectedItem.MapD }, 'Save');
+  save_(selectedItem, { MapW: d, MapD: w }, 'Save');
   renderCurrentView();
 }
 
@@ -1442,8 +1461,7 @@ function cycleSize_() {
   let nextW = 1, nextD = 1;
   if (w === 1 && d === 1) { nextW = 2; nextD = 1; }
   else if (w === 2 && d === 1) { nextW = 1; nextD = 2; }
-  selectedItem.MapW = nextW; selectedItem.MapD = nextD;
-  save_(selectedItem.ID, { MapW: nextW, MapD: nextD }, 'Save');
+  save_(selectedItem, { MapW: nextW, MapD: nextD }, 'Save');
   renderCurrentView();
 }
 
@@ -1451,7 +1469,7 @@ function cycleSize_() {
 function renderMap() { renderCurrentView(); }
 
 // ── Find: search box + deep links ────────────────────────────────────────
-// One light index (getSearchIndex) answers both the search box and a
+// One light index (getScanIndex, the same one Scan reads) answers both the search box and a
 // deep link (/<ID>, or a label's #(ANCHOR ...)): it holds every row's
 // ParentID, so the full Floor › ... › container path is built here.
 // Re-read when older than INDEX_MAX_AGE_MS, so a save made on Scan shows up
@@ -1463,7 +1481,7 @@ let foundId = null;
 function withIndex_(cb) {
   if (!indexP || Date.now() - indexAt > INDEX_MAX_AGE_MS) {
     indexAt = Date.now();
-    indexP = load_('the inventory list', { scope: 'search' });
+    indexP = load_('the inventory list', { scope: 'index' });
     indexP.catch(() => { indexP = null; });
   }
   indexP.then(cb, err => {
@@ -1474,20 +1492,21 @@ function withIndex_(cb) {
 // Same rule as idKey_ in src/Data.gs: case and _/-/space don't matter.
 const idKey_ = v => String(v || '').trim().toLowerCase().replace(/[\s_-]+/g, '-');
 
+// Same match as Scan's typed lookup: name or ID, idKey_ on both sides.
 function findGear_(q) {
   const box = document.getElementById('find-results');
-  q = q.trim().toLowerCase();
+  q = q.trim();
   if (q.length < 2) { box.innerHTML = ''; return; }
   withIndex_(rows => {
     const byId = indexById_(rows);
-    const hits = rows.filter(r => (String(r.Label) + ' ' + r.ID).toLowerCase().includes(q)).slice(0, 15);
+    const hits = rows.filter(r => idKey_(r.Label + ' ' + r.ID).includes(idKey_(q))).slice(0, 15);
     box.innerHTML = '';
     if (!hits.length) { box.textContent = 'Nothing matches “' + q + '”.'; return; }
     hits.forEach(r => {
       const parent = byId[idKey_(r.ParentID)];
       const b = document.createElement('button');
       b.textContent = (r.Label || r.ID) + (r.Label ? ' · ' + r.ID : '') +
-        ' — ' + (parent ? 'in ' + (parent.Label || parent.ID) : 'on the floor');
+        (parent ? ' — in ' + (parent.Label || parent.ID) : r.Virtual ? '' : ' — on the floor');
       b.onclick = () => openRow_(r);
       box.appendChild(b);
     });
@@ -1503,15 +1522,17 @@ function indexById_(rows) {
 
 function showObject(id) {
   withIndex_(rows => {
-    const o = indexById_(rows)[idKey_(id)];
+    const named = rows.filter(r => idKey_(r.Label) === idKey_(id));
+    const o = indexById_(rows)[idKey_(id)] || (named.length === 1 && named[0]);
     if (o) return openRow_(o);
     hideToolbar();
     navStack = []; foundId = null; renderCurrentView();
-    note_('No item with ID “' + id + '”. Try the search box.');
+    note_('No item called “' + id + '”. Search for it in the box above.');
   });
 }
 
 function openRow_(o) {
+  if (idKey_(o.ID) === 'floor') { document.getElementById('find-input').value = ''; document.getElementById('find-results').innerHTML = ''; return goHome(); }
   withIndex_(rows => {
     document.getElementById('find-results').innerHTML = '';
     document.getElementById('find-input').value = '';
@@ -1540,7 +1561,7 @@ function openRow_(o) {
 function markFound_(el, o) {
   if (!foundId || idKey_(o.ID) !== foundId) return;
   el.classList.add('found');
-  setTimeout(() => el.scrollIntoView({ block: 'nearest', inline: 'nearest' }), 0);
+  setTimeout(() => el.scrollIntoView({ block: 'center', inline: 'nearest' }), 0); // above the details panel
 }
 
 function note_(msg) {
@@ -1574,7 +1595,7 @@ function note_(msg) {
   <label for="report-description">Details</label>
   <textarea id="report-description" rows="5" required></textarea>
 
-  <p class="sweep-status">Reports are saved with the inventory. Whoever looks after the app turns them into tasks the next time they check, which is not on a schedule, so nobody is alerted straight away. Reports are public: anyone with the app's address can read them. Urgent? Email the Virtual Krewe of Vaporwave mailing list: <a href="mailto:kreweofvaporwave@googlegroups.com">kreweofvaporwave@googlegroups.com</a>.</p>
+  <p class="sweep-status">Reports are saved with the inventory. Whoever looks after the app turns them into tasks the next time they check, which is not on a schedule, so nobody is alerted straight away. Reports are not private: anyone who has the app's address can read them, so leave out anything private. Urgent? Email the Virtual Krewe of Vaporwave mailing list: <a href="mailto:kreweofvaporwave@googlegroups.com">kreweofvaporwave@googlegroups.com</a>.</p>
 
   <label for="report-name">Your name (optional)</label>
   <input type="text" id="report-name" maxlength="40">

@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="14abde75beed04aed4e9ecc3131cb88feb77386c">
+  <meta name="inventory-app-ref" content="2b43c4e7e7450a931b2a47df2a3c088dbbbff9f8">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -261,6 +261,7 @@
     border-radius: 10px;
     padding: 1px 6px;
     z-index: 10;
+    white-space: nowrap;
   }
   .map-empty { color: #888; font-size: 1.2em; text-align: center; }
 
@@ -285,6 +286,9 @@
   .find-note { margin: 0; padding: 0.4rem 1rem; color: #ff0; background: #000; font-size: 15px; }
   .floor-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 1rem 1rem; }
   .floor-list button { font-size: 15px; padding: 0.4rem 0.7rem; }
+  .floor-list span { flex-basis: 100%; color: #ccc; font-size: 14px; font-family: sans-serif; }
+  /* Room to scroll the outlined item above the details panel. */
+  body:has(.edit-toolbar:not([hidden])) { padding-bottom: 50vh; }
   .found { outline: 3px solid #ff0 !important; outline-offset: 2px; }
   .crumbs a:hover { text-decoration: underline; }
 
@@ -654,7 +658,12 @@ function freshId_(name) {
   return id;
 }
 const labelOf_ = id => (index && index[key_(id)] && index[key_(id)].Label) || canon_(id);
-const leavesFloor_ = n => { const r = index && index[key_(head(n))]; return r && !r.ParentID && !r.Virtual && !same_(anchor, 'floor'); };
+// Where an added thing is recorded now, if that is somewhere else: Save moves it from there.
+function from_(n) {
+  const r = index && index[key_(head(n))];
+  if (!r || r.Virtual || same_(r.ParentID, anchor) || (!r.ParentID && same_(anchor, 'floor'))) return '';
+  return '  (from ' + (r.ParentID ? labelOf_(r.ParentID) : 'the Floor') + ')';
+}
 // Something to save: items scanned in, or an old label's contents the sheet doesn't have.
 const pending_ = () => !!anchor && (session.length > 0 || (priorFrom === 'label' && priorState.length > 0));
 function nameOf_(node) {
@@ -860,6 +869,7 @@ function saveCubeToId() {
   const id = canon_(typed ? toId_(typed) : anchor || '');
   if (!id) { log('Enter an ID, or scan a container first.'); return; }
   if (!window._lastCubeDataUrl) return;
+  if (!confirm('Use this picture as ' + labelOf_(id) + '’s icon on the map, for everyone?')) return;
   postToServer_({ type: 'sprite', id, dataUrl: window._lastCubeDataUrl })
     .then(res => log(res && res.ok ? 'Saved 3D Pixel Cube for ' + id : 'Save failed: ' + (res && res.error)))
     .catch(err => log('Save failed: ' + err.message));
@@ -936,14 +946,18 @@ function renderStack() {
   if (!anchor) { el.textContent = 'Scan or type a container to start.'; return; }
   const adding = new Set(session.map(n => key_(head(n))));
   const already = priorState.filter(n => !adding.has(key_(head(n))));
-  let d = 'Container: ' + nameOf_(anchor) + '\n';
-  d += priorFrom === 'label' ? '\nIn it, per its printed label (sheet not reachable):\n'
-                             : '\nIn it now' + (index ? ', per the sheet' : '') + ':\n';
-  d += already.length ? already.map(n => '  ' + nameOf_(n)).join('\n') : '  (nothing)';
-  if (session.length) d += '\n\nAdding:\n' + session.map(n => '  + ' + nameOf_(n) + (leavesFloor_(n) ? '  (moves off the Floor)' : '')).join('\n');
+  const wasOpen = !!el.querySelector('details[open]');
+  const esc = v => String(v).replace(/[&<>]/g, c => '&#' + c.charCodeAt(0) + ';');
+  let d = 'Container: ' + esc(nameOf_(anchor)) + '\n';
+  if (session.length) d += '\nAdding:\n' + session.map(n => '  + ' + esc(nameOf_(n) + from_(n))).join('\n') + '\n';
+  const list = already.map(n => '  ' + esc(nameOf_(n))).join('\n');
+  const where = priorFrom === 'label' ? ', per its printed label (the inventory could not be reached)' : '';
+  d += '\n' + (!already.length ? 'Already inside' + where + ': nothing'
+    : already.length > 5 ? '<details' + (wasOpen ? ' open' : '') + '><summary>' + already.length + ' already inside' + where + ' — show</summary>' + list + '</details>'
+    : 'Already inside' + where + ':\n' + list);
   if (d.includes('★ NEW')) d += '\n\n★ NEW = not in the inventory yet: Save adds it.';
   d += '\n\n▸ Scan or type an item to put it in here.';
-  el.textContent = d;
+  el.innerHTML = d.replace('</details>\n', '</details>'); // a block already ends its line
 }
 
 // ── Undo ──────────────────────────────────────────────────────────────────
