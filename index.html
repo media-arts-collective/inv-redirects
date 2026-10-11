@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="ecc375150a7993e39503f9ce503e1a65f1dc996e">
+  <meta name="inventory-app-ref" content="1b2fbb8afe89ab6225abf661e1848ad954c7e7f4">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -1616,7 +1616,7 @@ function note_(msg) {
   <label for="report-description">Details</label>
   <textarea id="report-description" rows="5" required></textarea>
 
-  <p class="sweep-status">Reports are saved with the inventory. Whoever looks after the app turns them into tasks the next time they check, which is not on a schedule, so nobody is alerted straight away. Reports are not private: anyone who has the app's address can read them, so leave out anything private. Urgent? Email the Virtual Krewe of Vaporwave mailing list: <a href="mailto:kreweofvaporwave@googlegroups.com">kreweofvaporwave@googlegroups.com</a>.</p>
+  <p class="sweep-status">Reports are saved with the inventory. Whoever looks after the app turns them into tasks the next time they check, which is not on a schedule, so nobody is alerted straight away. Reports are not private: anyone who has the app's address can read them, so leave out anything private. Urgent? Krewe members can email the Virtual Krewe of Vaporwave mailing list: <a href="mailto:kreweofvaporwave@googlegroups.com">kreweofvaporwave@googlegroups.com</a> (it only accepts mail from members).</p>
 
   <label for="report-name">Your name (optional)</label>
   <input type="text" id="report-name" maxlength="40">
@@ -1693,7 +1693,7 @@ function note_(msg) {
         if (!r.ok) {
           if (r.status === 401 || r.status === 403) {
             throw new Error('locked:The tracker is locked down right now (HTTP ' + r.status +
-              ') — your report was NOT saved, and retrying won’t help. Please email the mailing list instead: kreweofvaporwave@googlegroups.com');
+              ') — your report was NOT saved, and retrying won’t help. Krewe members can email the mailing list instead (members only): kreweofvaporwave@googlegroups.com');
           }
           throw new Error('http:The server rejected the report (HTTP ' + r.status + '). Try again in a moment.');
         }
