@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="a31ef2c4075488be45c2af8f74c22bd3d9618a41">
+  <meta name="inventory-app-ref" content="a04bee3f05331829a9f8445b43c43d95a508f6ef">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -695,13 +695,13 @@ function openAnchor_(id, labelChildren) {
   loadIndex_(); // someone may have moved things since the page loaded
 }
 // Same rule as Browse's isContainer_: something is inside it, its Container
-// Style is a box kind, or it is a place on the Floor (no ParentID, no style).
+// Style is a box kind, or it is a top-level place (no parent, or in In/Out; no style).
 const BOX_STYLE_ = /crate|bin|box|shelf|stack|road-case/;
 function isBox_(id) {
   const r = index && index[key_(id)];
   if (!r) return false;
   const style = key_(r['Container Style']);
-  return !!r.Virtual || BOX_STYLE_.test(style) || (!key_(r.ParentID) && !style) || rows.some(c => same_(c.ParentID, id));
+  return !!r.Virtual || BOX_STYLE_.test(style) || (/^(|in|out)$/.test(key_(r.ParentID)) && !style) || rows.some(c => same_(c.ParentID, id));
 }
 // A new ID from a typed name: lowercase-dash, never one the sheet already has.
 function freshId_(name) {
@@ -1064,7 +1064,7 @@ function lookup_(val) {
   const exact = rows.filter(r => same_(r.Label, val));
   if (exact.length === 1 && shares(exact[0]).length === 1) { pushNode(String(exact[0].ID).trim()); return; }
   const hits = exact.length ? exact : search_(rows, val, 8);
-  const where = r => r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor';
+  const where = r => r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'at the top';
   const choices = hits.map(r => [(r.Label ? r.Label + ' · ' : '') + String(r.ID).trim() + ' (' + where(r) + ')', () => pushNode(String(r.ID).trim())]);
   const id = freshId_(val);
   if (!exact.length && id) choices.push(['Make new: ' + id, () => { names_[key_(id)] = val; anchor ? pushNode(id) : askBin_(id); }]);
@@ -1117,7 +1117,7 @@ function askBin_(id) {
   const isNew = !(index && index[key_(id)]);
   carry = String(r.ID).trim();
   const bins = [...recent_(), r.ParentID].filter((b, i, a) => b && isBox_(b) && a.findIndex(x => same_(x, b)) === i).slice(0, 4);
-  ask_(id, (isNew ? 'Where is ' + name + ' going?' : name + ' is ' + (r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor') + '.') + ' Scan or pick its bin.',
+  ask_(id, (isNew ? 'Where is ' + name + ' going?' : name + (r.ParentID ? ' is in ' + labelOf_(r.ParentID) : '') + '.') + ' Scan or pick its bin.',
     [...bins.map(b => [labelOf_(b), () => open_(canon_(b), [])]),
      ['＋ New bin', newBin_],
      [isNew ? 'Just ' + name + ' (Save prints its label)' : 'Use ' + name + ' as a bin', () => { carry = null; open_(String(r.ID).trim(), []); }]]);
@@ -1158,7 +1158,7 @@ async function doClose() {
   const photo = document.getElementById('use-photo').checked ? captureSnapshot_() : null;
   document.getElementById('use-photo').checked = false;
   const moved = (sent.slice(1).filter(n => head(n) !== 't')).map(n => labelOf_(head(n)));
-  const into  = same_(tree[0], 'floor') ? 'back on the Floor' : 'in ' + labelOf_(tree[0]);
+  const into  = 'in ' + labelOf_(same_(tree[0], 'floor') ? 'in' : tree[0]);
   anchor=null; priorState=[]; priorFrom=null; session=[]; history=[];
   lastScanId=null; hideAsk_();
   renderStack();

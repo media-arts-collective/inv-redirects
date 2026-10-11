@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="a31ef2c4075488be45c2af8f74c22bd3d9618a41">
+  <meta name="inventory-app-ref" content="a04bee3f05331829a9f8445b43c43d95a508f6ef">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -725,11 +725,11 @@ function resolvedStyleKey_(o) {
 // has some real Container Style of its own.
 // A container opens to its contents, even when nothing is recorded inside:
 // it has something inside, or its Container Style is a box kind, or it is
-// a place on the Floor (no ParentID, no style of its own).
+// a place at the top or in In/Out (no style of its own).
 const BOX_STYLE_ = /crate|bin|box|shelf|stack|road-case/;
 function isContainer_(o, inside) {
   const key = resolvedStyleKey_(o);
-  return Number(inside || 0) > 0 || BOX_STYLE_.test(key) || (!idKey_(o.ParentID) && !key);
+  return Number(inside || 0) > 0 || BOX_STYLE_.test(key) || (TOP_.test(idKey_(o.ParentID)) && !key);
 }
 
 function isLooseStyle_(o) {
@@ -821,7 +821,7 @@ let selectedLevel = null;
 
 function renderCrumbs() {
   const crumbs = document.getElementById('crumbs');
-  let html = '<a onclick="goHome()">🏠 Floor</a>';
+  let html = '<a onclick="goHome()">🏠 In</a>';
   navStack.forEach((entry, i) => {
     html += ' › <a onclick="goToCrumb(' + i + ')">' + (entry.Label || entry.ID) + '</a>';
   });
@@ -956,7 +956,7 @@ function save_(o, fields, what) {
 }
 
 function renderIsoRoot(v) {
-  load_('the Floor', { scope: 'roots' }).then(function (roots) {
+  load_('In', { scope: 'roots' }).then(function (roots) {
     if (v !== view_) return;
     const container = document.getElementById('map-container');
     container.className = 'map-container map-container--iso';
@@ -982,7 +982,7 @@ function renderIsoRoot(v) {
     const list = document.getElementById('floor-list');
     list.innerHTML = '';
     (roots || []).forEach((o, i, all) => {
-      if (o.Virtual && !(all[i - 1] || {}).Virtual) list.insertAdjacentHTML('beforeend', '<span>Not on the floor:</span>');
+      if (o.Virtual && !(all[i - 1] || {}).Virtual) list.insertAdjacentHTML('beforeend', '<span>Elsewhere:</span>');
       const b = document.createElement('button');
       b.textContent = o.Label || o.ID;
       b.onclick = () => openRow_(o);
@@ -1498,7 +1498,7 @@ function showToolbar_() {
 function showDetails_(o, d, err) {
   const el = document.getElementById('details');
   if (!el || selectedItem !== o) return;
-  if (o.Virtual) { el.textContent = 'Not on the floor. Scan gear into it like a bin.'; return; }
+  if (o.Virtual) { el.textContent = 'Scan gear into it like a bin.'; return; }
   if (!d) { el.textContent = err ? 'Details failed to load: ' + err : 'Not in the sheet.'; return; }
   const row = (k, v) => v ? '<div><b>' + k + ':</b> ' + esc_(v) + '</div>' : '';
   const photo = /^https?:\/\//.test(d.Photo) ? '<div><a href="' + esc_(d.Photo) + '" target="_blank">📷 Photo</a></div>'
@@ -1548,7 +1548,7 @@ function renderMap() { renderCurrentView(); }
 // ── Find: search box + deep links ────────────────────────────────────────
 // One light index (getScanIndex, the same one Scan reads) answers both the search box and a
 // deep link (/<ID>, or a label's #(ANCHOR ...)): it holds every row's
-// ParentID, so the full Floor › ... › container path is built here.
+// ParentID, so the full In › ... › container path is built here.
 // Re-read when older than INDEX_MAX_AGE_MS, so a save made on Scan shows up
 // without reloading (the search box prefetches on focus).
 const INDEX_MAX_AGE_MS = 30 * 1000;
@@ -1567,6 +1567,8 @@ function withIndex_(cb) {
 }
 
 // Same rule as idKey_ in src/Data.gs: case and _/-/space don't matter.
+// No parent, In or Out: a top-level place.
+const TOP_ = /^(|in|out)$/;
 const idKey_ = v => String(v || '').trim().toLowerCase().replace(/[\s_-]+/g, '-');
 
 // Same match as Scan's typed lookup: name or ID, idKey_ on both sides.
@@ -1583,7 +1585,7 @@ function findGear_(q) {
       const parent = byId[idKey_(r.ParentID)];
       const b = document.createElement('button');
       b.textContent = (r.Label || r.ID) + (r.Label ? ' · ' + r.ID : '') +
-        (parent ? ' — in ' + (parent.Label || parent.ID) : r.Virtual ? '' : ' — on the floor');
+        (parent ? ' — in ' + (parent.Label || parent.ID) : '');
       b.onclick = () => openRow_(r);
       box.appendChild(b);
     });
@@ -1617,7 +1619,7 @@ function openRow_(o) {
     const byId = indexById_(rows);
     const path = [];
     const seen = {};
-    for (let p = byId[idKey_(o.ParentID)]; p && !seen[idKey_(p.ID)]; p = byId[idKey_(p.ParentID)]) {
+    for (let p = byId[idKey_(o.ParentID)]; p && !seen[idKey_(p.ID)] && idKey_(p.ID) !== 'in'; p = byId[idKey_(p.ParentID)]) {
       seen[idKey_(p.ID)] = true;
       path.unshift(p);
     }
@@ -1630,7 +1632,7 @@ function openRow_(o) {
     if (!hasChildren) {
       selectItem_(o, null, null);
       const where = path.length ? path[path.length - 1] : null;
-      note_((o.Label || o.ID) + ' is ' + (where ? 'in ' + (where.Label || where.ID) : 'on the floor') + '.');
+      note_((o.Label || o.ID) + (where ? ' is in ' + (where.Label || where.ID) : '') + '.');
     }
   });
 }
