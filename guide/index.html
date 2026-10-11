@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="69f8e7104e795538583349c9c8fbcb46ff624097">
+  <meta name="inventory-app-ref" content="a31890f94ac9a7e32790404ebfa02b0c3697e697">
   <title>VKV Inventory guide</title>
 <!-- style.html -->
 <style>
@@ -428,6 +428,10 @@
 
   /* ── Scan tab (ported from ScanScript) ───────────────────────────────── */
   #tab-scan { font-family: monospace; }
+  #tab-scan #stack-display { border: 0; background: none; padding: 4px 0; min-height: 0; color: #ccc; font-family: sans-serif; font-size: 15px; }
+  #tab-scan .starts, #tab-scan .scan-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  #tab-scan .starts button { margin: 0; }
+  #tab-scan label { display: block; font-family: sans-serif; font-size: 14px; margin: 6px 0; }
   #tab-scan pre {
     white-space: pre-wrap;
     word-break: break-all;
@@ -440,13 +444,16 @@
     font-size: 0.9em;
   }
   #tab-scan input[type=text] {
-    font-family: monospace;
-    font-size: 14px;
-    width: calc(100% - 90px);
-    padding: 4px;
+    font-family: sans-serif;
+    font-size: 18px;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 8px 0 4px;
+    padding: 12px;
     background: #111;
     color: #ff0;
-    border: 1px solid #444;
+    border: 2px solid cyan;
+    border-radius: 6px;
   }
   #tab-scan button {
     font-size: 14px;

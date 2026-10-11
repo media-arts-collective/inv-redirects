@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="69f8e7104e795538583349c9c8fbcb46ff624097">
+  <meta name="inventory-app-ref" content="a31890f94ac9a7e32790404ebfa02b0c3697e697">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -428,6 +428,10 @@
 
   /* ── Scan tab (ported from ScanScript) ───────────────────────────────── */
   #tab-scan { font-family: monospace; }
+  #tab-scan #stack-display { border: 0; background: none; padding: 4px 0; min-height: 0; color: #ccc; font-family: sans-serif; font-size: 15px; }
+  #tab-scan .starts, #tab-scan .scan-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  #tab-scan .starts button { margin: 0; }
+  #tab-scan label { display: block; font-family: sans-serif; font-size: 14px; margin: 6px 0; }
   #tab-scan pre {
     white-space: pre-wrap;
     word-break: break-all;
@@ -440,13 +444,16 @@
     font-size: 0.9em;
   }
   #tab-scan input[type=text] {
-    font-family: monospace;
-    font-size: 14px;
-    width: calc(100% - 90px);
-    padding: 4px;
+    font-family: sans-serif;
+    font-size: 18px;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 8px 0 4px;
+    padding: 12px;
     background: #111;
     color: #ff0;
-    border: 1px solid #444;
+    border: 2px solid cyan;
+    border-radius: 6px;
   }
   #tab-scan button {
     font-size: 14px;
@@ -555,6 +562,48 @@ function spriteFor(containerStyle) {
   if (!containerStyle) return SPRITES['default'];
   const key = String(containerStyle).trim().toLowerCase().replace(/\s+/g, '-');
   return SPRITES[STYLE_ALIASES[key] || key] || SPRITES['default'];
+}
+</script>
+<script>
+// Search shared by Browse and Scan. Every typed word must match a word of the
+// thing's name or ID: whole word, start of word, inside a word, or one typo
+// (two for 7+ letters; swapped letters count as one). Best matches first.
+function words_(s) { return String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean); }
+
+function typos_(a, b) { // restricted Damerau-Levenshtein distance
+  const d = [];
+  for (let i = 0; i <= a.length; i++) { d[i] = [i]; }
+  for (let j = 0; j <= b.length; j++) { d[0][j] = j; }
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] !== b[j - 1]));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[a.length][b.length];
+}
+
+function wordScore_(q, ws) {
+  const k = q.length >= 7 ? 2 : q.length >= 4 ? 1 : 0;
+  let best = 0;
+  for (const w of ws) {
+    if (w === q) return 4;
+    if (w.startsWith(q)) best = Math.max(best, 3);
+    else if (w.includes(q)) best = Math.max(best, 2);
+    else if (k && (typos_(q, w) <= k || typos_(q, w.slice(0, q.length)) <= k)) best = Math.max(best, 1);
+  }
+  return best;
+}
+
+function search_(rows, q, limit) {
+  const qw = words_(q);
+  if (!qw.length) return [];
+  const scored = [];
+  rows.forEach(r => {
+    const ws = words_(r.Label + ' ' + r.ID);
+    let s = 0;
+    for (const w of qw) { const x = wordScore_(w, ws); if (!x) return; s += x; }
+    scored.push([s, r]);
+  });
+  return scored.sort((a, b) => b[0] - a[0]).slice(0, limit).map(x => x[1]);
 }
 </script>
 <script>
@@ -1526,7 +1575,7 @@ function findGear_(q) {
   if (q.length < 2) { box.textContent = q ? 'Type one more letter.' : ''; return; }
   withIndex_(rows => {
     const byId = indexById_(rows);
-    const hits = rows.filter(r => idKey_(r.Label + ' ' + r.ID).includes(idKey_(q))).slice(0, 15);
+    const hits = search_(rows, q, 15);
     box.innerHTML = '';
     if (!hits.length) { box.textContent = 'Nothing matches “' + q + '”.'; return; }
     hits.forEach(r => {

@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="69f8e7104e795538583349c9c8fbcb46ff624097">
+  <meta name="inventory-app-ref" content="a31890f94ac9a7e32790404ebfa02b0c3697e697">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -428,6 +428,10 @@
 
   /* ── Scan tab (ported from ScanScript) ───────────────────────────────── */
   #tab-scan { font-family: monospace; }
+  #tab-scan #stack-display { border: 0; background: none; padding: 4px 0; min-height: 0; color: #ccc; font-family: sans-serif; font-size: 15px; }
+  #tab-scan .starts, #tab-scan .scan-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  #tab-scan .starts button { margin: 0; }
+  #tab-scan label { display: block; font-family: sans-serif; font-size: 14px; margin: 6px 0; }
   #tab-scan pre {
     white-space: pre-wrap;
     word-break: break-all;
@@ -440,13 +444,16 @@
     font-size: 0.9em;
   }
   #tab-scan input[type=text] {
-    font-family: monospace;
-    font-size: 14px;
-    width: calc(100% - 90px);
-    padding: 4px;
+    font-family: sans-serif;
+    font-size: 18px;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 8px 0 4px;
+    padding: 12px;
     background: #111;
     color: #ff0;
-    border: 1px solid #444;
+    border: 2px solid cyan;
+    border-radius: 6px;
   }
   #tab-scan button {
     font-size: 14px;
@@ -483,13 +490,54 @@
 <script>const BASE_URL = 'https://script.google.com/macros/s/AKfycbxBBxoknH6_85m6r6QI8fAkCH8gqpQ4PL3fOoDGzAfVMroXUoWu3zqPhi1SfgGKMCde/exec';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <section id="tab-scan" class="tab-panel active">
+<script>
+// Search shared by Browse and Scan. Every typed word must match a word of the
+// thing's name or ID: whole word, start of word, inside a word, or one typo
+// (two for 7+ letters; swapped letters count as one). Best matches first.
+function words_(s) { return String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean); }
+
+function typos_(a, b) { // restricted Damerau-Levenshtein distance
+  const d = [];
+  for (let i = 0; i <= a.length; i++) { d[i] = [i]; }
+  for (let j = 0; j <= b.length; j++) { d[0][j] = j; }
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] !== b[j - 1]));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[a.length][b.length];
+}
+
+function wordScore_(q, ws) {
+  const k = q.length >= 7 ? 2 : q.length >= 4 ? 1 : 0;
+  let best = 0;
+  for (const w of ws) {
+    if (w === q) return 4;
+    if (w.startsWith(q)) best = Math.max(best, 3);
+    else if (w.includes(q)) best = Math.max(best, 2);
+    else if (k && (typos_(q, w) <= k || typos_(q, w.slice(0, q.length)) <= k)) best = Math.max(best, 1);
+  }
+  return best;
+}
+
+function search_(rows, q, limit) {
+  const qw = words_(q);
+  if (!qw.length) return [];
+  const scored = [];
+  rows.forEach(r => {
+    const ws = words_(r.Label + ' ' + r.ID);
+    let s = 0;
+    for (const w of qw) { const x = wordScore_(w, ws); if (!x) return; s += x; }
+    scored.push([s, r]);
+  });
+  return scored.sort((a, b) => b[0] - a[0]).slice(0, limit).map(x => x[1]);
+}
+</script>
 <!-- scan.html: camera QR scan + BT label printer, ported from scanscript/index.html.
      Same stack-building logic and s-expression scheme; the only change is
      that doClose() now commits to the Inventory sheet via commitScan()
      instead of POSTing to a local /log file. -->
 
-<b>Scan</b> — <span id="bt-status">printer not connected</span> <button onclick="toggleBT()" id="bt-btn">Connect Printer</button>
-<p class="scan-help">Scan a bin, scan each thing you put in it, then press Save. Checking gear out works the same way: scan the bin it is going out in, or start a new one with ＋ New bin. <a href="/guide/">📖 Guide</a></p>
+<p id="bt-row"><span id="bt-status">printer not connected</span> <button onclick="toggleBT()" id="bt-btn">Connect printer</button></p>
 <p id="cam-msg" class="save-status err" hidden></p>
 
 <div id="camera-wrap">
@@ -497,25 +545,25 @@
   <div id="reticle"><div class="r"><div class="rb"></div><div class="rc"></div></div></div>
 </div>
 
-<pre id="stack-display">—</pre>
+<input type="text" id="push-input" placeholder="Type a name or ID" enterkeyhint="go" onkeydown="onPushKey(event)">
 <div id="ask" class="scan-help" hidden><span id="ask-text"></span><br><span id="ask-btns"></span></div>
-<div id="new-row" class="scan-help" hidden>Gear going out with no bin? <button onclick="newBin_()">＋ New bin</button></div>
-<div id="virtual-row" class="scan-help" hidden>Putting something back on the Floor, or is it lost, broken or retired? Start with one of these instead of a bin: <span id="virtual-btns"></span></div>
+<pre id="stack-display">—</pre>
+<div class="starts"><span id="new-row" hidden><button onclick="newBin_()">＋ New bin</button></span><span id="virtual-row" hidden><span id="virtual-btns"></span></span></div>
 
-<input type="text" id="push-input" placeholder="type a name or ID and press Enter…" onkeydown="onPushKey(event)">
+<div class="scan-actions">
 <button id="save-btn" onclick="doClose()" disabled>Save</button>
 <button onclick="undoLast()">Undo</button>
 <button onclick="clearStack()">Close without saving</button>
+</div>
 <div id="save-status" class="save-status" hidden></div>
-<label><input type="checkbox" id="use-photo"> also save what the camera sees now as its photo (only if it has none)</label>
-<label id="confirm-print-row"><input type="checkbox" id="confirm-print" onchange="savePrefs()"> ask before printing</label>
-<br><br>
+<label><input type="checkbox" id="use-photo"> Save camera view as its photo</label>
+<label id="confirm-print-row"><input type="checkbox" id="confirm-print" onchange="savePrefs()"> Ask before printing</label>
 
 <canvas id="qr-canvas"></canvas>
 <button id="share-btn" onclick="shareLabel()" hidden>Share label</button>
 
 <details style="margin-top:1rem;font-size:0.85em;color:#999;">
-  <summary style="cursor:pointer;">Advanced: what the app did (for fixing problems), 3D Pixel Cube</summary>
+  <summary style="cursor:pointer;">Advanced</summary>
   <b>Last saved:</b>
   <pre id="closure">—</pre>
   <b>Label link:</b>
@@ -949,7 +997,7 @@ function renderStack() {
   const btn = document.getElementById('save-btn');
   btn.disabled = !pending_();
   btn.textContent = pending_() ? 'Save: ' + (session.length || priorState.length) + ' into ' + labelOf_(anchor) : 'Save';
-  if (!anchor) { el.textContent = 'Scan or type a container to start.'; return; }
+  if (!anchor) { el.textContent = 'Scan or type a bin to start.'; return; }
   const adding = new Set(session.map(n => key_(head(n))));
   const already = priorState.filter(n => !adding.has(key_(head(n))));
   const wasOpen = !!el.querySelector('details[open]');
@@ -1027,13 +1075,13 @@ function onPushKey(e) {
 }
 
 // An exact ID, or a name only one thing has, is used straight away. Anything
-// else lists what matches (same idea as Browse's search) plus "Make new".
+// else lists what matches (search_, html/match.html, shared with Browse) plus "Make new".
 function lookup_(val) {
   if (!index || index[key_(val)]) { pushNode(toId_(val)); return; }
   const shares = r => rows.filter(o => same_(o.ID, r.ID));
   const exact = rows.filter(r => same_(r.Label, val));
   if (exact.length === 1 && shares(exact[0]).length === 1) { pushNode(String(exact[0].ID).trim()); return; }
-  const hits = exact.length ? exact : rows.filter(r => key_(r.Label + ' ' + r.ID).includes(key_(val))).slice(0, 8);
+  const hits = exact.length ? exact : search_(rows, val, 8);
   const where = r => r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor';
   const choices = hits.map(r => [(r.Label ? r.Label + ' · ' : '') + String(r.ID).trim() + ' (' + where(r) + ')', () => pushNode(String(r.ID).trim())]);
   const id = freshId_(val);
@@ -1234,7 +1282,7 @@ async function startCamera() {
   } catch(e) {
     log('Camera error: '+e.message);
     const m = document.getElementById('cam-msg');
-    m.textContent = 'The camera is off (' + e.message + '). You can still type names below. To turn it on, on an iPhone: tap aA in the address bar › Website Settings › Camera › Allow, then reload this page.';
+    m.textContent = 'Camera off. Type names instead, or allow the camera and reload.';
     m.hidden = false;
   }
 }
@@ -1414,9 +1462,7 @@ function bootFromHash() {
 function initScan() {
   // iPhone browsers (Safari, Chrome) have no Web Bluetooth.
   if (!navigator.bluetooth) {
-    document.getElementById('bt-status').textContent =
-      'this browser cannot reach the label printer (iPhones cannot). After saving, Share label sends the label to the Phomemo app or another printer.';
-    document.getElementById('bt-btn').hidden = true;
+    document.getElementById('bt-row').hidden = true;
     document.getElementById('confirm-print-row').hidden = true;
   }
   loadPrefs();
