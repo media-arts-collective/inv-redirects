@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="30610e4b0a0fa7717950417d24996fe3a6394d2f">
+  <meta name="inventory-app-ref" content="b96482da2fbba402579c62aa0d5927987eaec10d">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -554,7 +554,7 @@ function search_(rows, q, limit) {
 <div class="starts"><span id="new-row" hidden><button onclick="newBin_()">＋ New bin</button></span></div>
 
 <div class="scan-actions">
-<button id="save-btn" onclick="pending_() ? doClose() : printLabel_()" disabled>Save</button>
+<button id="save-btn" onclick="pending_() ? doClose() : printLabel_()" hidden>Save</button>
 <button id="photo-btn" onclick="addPhoto_()" hidden>📷 Photo</button>
 <button onclick="undoLast()">Undo</button>
 </div>
