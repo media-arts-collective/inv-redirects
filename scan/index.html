@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="df31076b4ef981f04a2c98ccf5d19d1e0f8936e9">
+  <meta name="inventory-app-ref" content="8dc6f07bae1f47ead1980f24c959f40859354c16">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -552,6 +552,7 @@ function search_(rows, q, limit) {
 <div class="starts"><span id="new-row" hidden><button onclick="newBin_()">＋ New bin</button></span></div>
 
 <div class="scan-actions">
+<button id="photo-btn" onclick="addPhoto_()" hidden>📷 Add photo</button>
 <button id="save-btn" onclick="doClose()" disabled>Save</button>
 <button onclick="undoLast()">Undo</button>
 <button onclick="clearStack()">Close without saving</button>
@@ -620,6 +621,7 @@ let session     = [];   // nodes pushed this session
 let history     = [];   // undo stack: [{anchor, priorState, priorFrom, session}]
 let lastScanId  = null; // for trivial double-scan detection
 let carry       = null; // an item scanned with nothing open: it goes into the next bin opened
+const photos_   = {};   // key_(photo entry ID) -> its picture; Save sends it as that row's Photo
 const names_    = {};   // key_(new ID) -> the name typed for it (New bin, Make new); Save sends it as the Label
 
 // ── Prefs ─────────────────────────────────────────────────────────────────
@@ -647,8 +649,8 @@ function postToServer_(body) {
   }).then(r => r.json());
 }
 
-function commitToServer(scheme, photo, labels) {
-  return postToServer_({ type: 'scan', scheme, photo, labels })
+function commitToServer(scheme, photo, labels, photos) {
+  return postToServer_({ type: 'scan', scheme, photo, labels, photos })
     .then(res => res && res.ok ? null : (res && res.error) || 'no answer')
     .catch(err => 'connection: ' + err.message);
 }
@@ -986,12 +988,13 @@ function merge(prior, sess) {
 function renderStack() {
   const el = document.getElementById('stack-display');
   document.getElementById('new-row').hidden = !!anchor;
+  document.getElementById('photo-btn').hidden = !anchor;
   const btn = document.getElementById('save-btn');
   btn.disabled = !pending_();
   btn.textContent = !pending_() ? 'Save' : session.length ? 'Save: ' + session.length + ' into ' + labelOf_(anchor) : 'Save ' + labelOf_(anchor);
   if (!anchor) { el.textContent = '—'; return; }
   const tree = [anchor, ...merge(priorState, session)];
-  const fresh = [...new Set(tree.flat(Infinity).map(String))].filter(id => index && !index[key_(id)]);
+  const fresh = [...new Set(tree.flat(Infinity).map(String))].filter(id => index && !index[key_(id)] && !photos_[key_(id)]);
   el.textContent = pretty(tree) + (fresh.length ? '\n\n★ NEW: ' + fresh.join(', ') : '');
 }
 
@@ -1122,6 +1125,15 @@ function askBin_(id) {
      ['＋ New bin', newBin_],
      [isNew ? 'Just ' + name + ' (Save prints its label)' : 'Use ' + name + ' as a bin', () => { carry = null; open_(String(r.ID).trim(), []); }]]);
 }
+// Untracked stuff (cords, gaffer tape): a picture goes in the open bin as its own entry.
+function addPhoto_() {
+  const shot = captureSnapshot_();
+  if (!shot) { saveStatus_('err', 'No camera picture to add.'); return; }
+  const id = 'photo-' + Date.now().toString(36).slice(-6);
+  photos_[key_(id)] = shot;
+  names_[key_(id)] = 'Photo ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  addNode_(id);
+}
 function addNode_(node) {
   if (session.some(n => same_(head(n), head(node)))) { log(labelOf_(head(node)) + ' is already on the list'); return; }
   saveHistory();
@@ -1165,7 +1177,9 @@ async function doClose() {
 
   const labels = {};
   sent.flat(Infinity).forEach(id => { if (names_[key_(id)] && !(index && index[key_(id)])) labels[key_(id)] = names_[key_(id)]; });
-  const err = await commitToServer(scheme, photo, labels);
+  const photos = {};
+  sent.flat(Infinity).forEach(id => { if (photos_[key_(id)]) photos[key_(id)] = photos_[key_(id)]; });
+  const err = await commitToServer(scheme, photo, labels, photos);
   if (err) {
     log('NOT saved: ' + err);
     // Put the list back so Save can simply be pressed again.
