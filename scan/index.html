@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="f0305b669f599e3dd853130172a1583f3a959d2b">
+  <meta name="inventory-app-ref" content="7f9c5bd520c4d0226476aa6a8da8a3d6c3b13f54">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -73,7 +73,7 @@
   /* ── Isometric map ────────────────────────────────────────────────────── */
   .map-wrapper {
     display: flex;
-    justify-content: center;
+    justify-content: safe center; /* overflow scrolls from the left edge instead of clipping it (issue #6) */
     overflow: hidden; /* was overflow-x:auto -- content now scales to fit the
       viewport instead of scrolling, see fitMapToViewport_() in browse.html */
     padding: 2rem 0;
@@ -273,6 +273,15 @@
     border-bottom: 1px solid #222;
   }
   .crumbs a { color: cyan; text-decoration: none; cursor: pointer; }
+
+  .find { padding: 0.5rem 1rem 0; background: #000; }
+  .find input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 0.5rem; }
+  #find-results { color: #888; }
+  #find-results button { display: block; width: 100%; text-align: left; margin-top: 4px; padding: 0.5rem; font-size: 15px; }
+  .find-note { margin: 0; padding: 0.4rem 1rem; color: #ff0; background: #000; font-size: 15px; }
+  .floor-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 1rem 1rem; }
+  .floor-list button { font-size: 15px; padding: 0.4rem 0.7rem; }
+  .found { outline: 3px solid #ff0 !important; outline-offset: 2px; }
   .crumbs a:hover { text-decoration: underline; }
 
   .edit-toolbar {
@@ -465,20 +474,20 @@
 
 <div id="last-seen" style="font-size:12px;min-height:16px;margin-bottom:4px;"></div>
 
-<b>Stack:</b>
+<b>Container:</b>
 <pre id="stack-display">—</pre>
 
-<input type="text" id="push-input" placeholder="type ID and press Enter to push…" onkeydown="onPushKey(event)">
-<button onclick="manualClose()">Print</button>
+<input type="text" id="push-input" placeholder="type an ID and press Enter…" onkeydown="onPushKey(event)">
+<button onclick="manualClose()">Save + label</button>
 <button onclick="undoLast()">Undo</button>
 <button onclick="clearStack()">Clear</button>
 <br>
-<label><input type="checkbox" id="confirm-print" onchange="savePrefs()"> confirm before print</label>
+<label><input type="checkbox" id="confirm-print" onchange="savePrefs()"> ask before printing</label>
 <br><br>
 
-<b>Last closure:</b>
+<b>Last saved:</b>
 <pre id="closure">—</pre>
-<b>Payload:</b>
+<b>Label link:</b>
 <pre id="url-display">—</pre>
 <canvas id="qr-canvas"></canvas>
 
@@ -560,8 +569,17 @@ function postToServer_(body) {
 
 function commitToServer(scheme, photo) {
   postToServer_({ type: 'scan', scheme, photo })
-    .then(res => log(res && res.ok ? 'Committed to sheet' : 'Commit failed: ' + (res && res.error)))
-    .catch(err => log('Commit error: ' + err.message));
+    .then(res => log(res && res.ok ? 'Saved to sheet' : 'NOT saved: ' + (res && res.error)))
+    .catch(err => log('NOT saved (connection): ' + err.message));
+}
+
+// Every ID already in the sheet, so a typo shows up as "new" before saving.
+let knownIds = null;
+const ids_ = n => Array.isArray(n) ? (n[0] === 'T' ? [] : n.flatMap(ids_)) : [n];
+function loadKnownIds_() {
+  fetch(BASE_URL + '?scope=ids').then(r => r.json())
+    .then(ids => { knownIds = new Set(ids); renderStack(); })
+    .catch(err => log('Could not load the ID list: ' + err.message));
 }
 
 // Snapshot the live camera feed once, at close time -- not per individual
@@ -758,7 +776,7 @@ function cancelCubeCapture() {
 
 function saveCubeToId() {
   const id = document.getElementById('cube-id-input').value.trim().toUpperCase() || anchor;
-  if (!id) { log('Enter an ID, or push/scan one first so there is a current anchor.'); return; }
+  if (!id) { log('Enter an ID, or scan a container first.'); return; }
   if (!window._lastCubeDataUrl) return;
   postToServer_({ type: 'sprite', id, dataUrl: window._lastCubeDataUrl })
     .then(res => log(res && res.ok ? 'Saved 3D Pixel Cube for ' + id : 'Save failed: ' + (res && res.error)))
@@ -830,7 +848,9 @@ function renderStack() {
   const children = merge(priorState, session);
   const tree     = anchor ? [anchor, ...children] : children;
   let display = tree.length > 0 ? pretty(tree) : '—';
-  if (anchor) display += '\n  ▸ (type ID to push here)';
+  if (anchor) display += '\n  ▸ (scan or type an item to put it in here)';
+  const fresh = knownIds ? ids_(tree).filter(id => !knownIds.has(id)) : [];
+  if (fresh.length) display += '\n\n★ NEW, not in the inventory yet: ' + fresh.join(', ') + '\n  (a typo? press Undo)';
   document.getElementById('stack-display').textContent = display;
 }
 
@@ -840,7 +860,7 @@ function showLastSeen(id) {
   const el = document.getElementById('last-seen');
   if (!cached) { el.textContent=''; return; }
   const s = serialize(cached);
-  el.innerHTML = 'last seen: <code>' + s.slice(0,80)+(s.length>80?'…':'')+'</code> '
+  el.innerHTML = 'last saved on this phone: <code>' + s.slice(0,80)+(s.length>80?'…':'')+'</code> '
     + '<button onclick="useCached()">use</button>';
   el._cached = cached;
 }
@@ -889,7 +909,7 @@ function pushNode(node) {
     session.push(node);
   }
   renderStack();
-  log('PUSH: ' + serialize(Array.isArray(node) ? node : [node]));
+  log('Added: ' + serialize(Array.isArray(node) ? node : [node]));
 }
 
 // ── Closure ───────────────────────────────────────────────────────────────
@@ -907,6 +927,7 @@ async function doClose() {
   document.getElementById('url-display').textContent = payload;
 
   if (anchor) cacheSet(anchor, tree);
+  if (knownIds) ids_(tree).forEach(id => knownIds.add(id));
   renderQRCanvas(payload, anchor||head(tree), tsHuman);
 
   const doPrint = !document.getElementById('confirm-print').checked ||
@@ -918,7 +939,7 @@ async function doClose() {
   }
 
   commitToServer(scheme, captureSnapshot_());
-  log('CLOSE: ' + scheme);
+  log('Saving: ' + scheme);
 
   anchor=null; priorState=[]; session=[]; history=[];
   lastScanId=null;
@@ -989,7 +1010,7 @@ function onScan(raw) {
     const node = scannedChildren.length > 0 ? tree : scannedHead;
     session.push(node);
     renderStack();
-    log('PUSH: ' + serialize(Array.isArray(node)?node:[node]));
+    log('Added: ' + serialize(Array.isArray(node)?node:[node]));
   }
 }
 
@@ -1166,6 +1187,7 @@ function initScan() {
   startCamera();
   bootFromHash();
   renderStack();
+  loadKnownIds_();
   log('Scan ready');
 }
 </script>
