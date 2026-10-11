@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="16a404ff277e2a1793535ae6dbac58eea6a30aaa">
+  <meta name="inventory-app-ref" content="1fa499afaceed24fbafd2e5e064d20022284e281">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -733,11 +733,14 @@ function renderCrumbs() {
   navStack.forEach((entry, i) => {
     html += ' › <a onclick="goToCrumb(' + i + ')">' + (entry.Label || entry.ID) + '</a>';
   });
+  if (navStack.length) html += ' <button onclick="showHere_()">ℹ️ Details</button>';
   crumbs.innerHTML = html;
   document.getElementById('find-note').hidden = true;
   document.getElementById('floor-list').innerHTML = '';
 }
 
+// The open container's own details (the map's double-click is mouse-only).
+function showHere_() { selectItem_(Object.assign({}, navStack[navStack.length - 1], { ChildCount: 0 }), null, null); }
 function goHome() { navStack = []; hideToolbar(); renderCurrentView(); }
 function goToCrumb(i) { navStack = navStack.slice(0, i + 1); hideToolbar(); renderCurrentView(); }
 
@@ -1510,7 +1513,7 @@ function note_(msg) {
   <label for="report-description">Details</label>
   <textarea id="report-description" rows="5" required></textarea>
 
-  <p class="sweep-status">Each report is filed as a task for the people who maintain this app. Reports are public: anyone with the app's address can read them. Urgent? Contact the Virtual Krewe of Vaporwave mailing list.</p>
+  <p class="sweep-status">Reports are saved with the inventory. Whoever looks after the app turns them into tasks the next time they check, which is not on a schedule, so nobody is alerted straight away. Reports are public: anyone with the app's address can read them. Urgent? Email the Virtual Krewe of Vaporwave mailing list: <a href="mailto:kreweofvaporwave@googlegroups.com">kreweofvaporwave@googlegroups.com</a>.</p>
 
   <label for="report-name">Your name (optional)</label>
   <input type="text" id="report-name" maxlength="40">
@@ -1587,7 +1590,7 @@ function note_(msg) {
         if (!r.ok) {
           if (r.status === 401 || r.status === 403) {
             throw new Error('locked:The tracker is locked down right now (HTTP ' + r.status +
-              ') — your report was NOT saved. This needs an admin to restore the app’s access; retrying won’t help.');
+              ') — your report was NOT saved, and retrying won’t help. Please email the mailing list instead: kreweofvaporwave@googlegroups.com');
           }
           throw new Error('http:The server rejected the report (HTTP ' + r.status + '). Try again in a moment.');
         }
@@ -1596,12 +1599,12 @@ function note_(msg) {
           // back a non-JSON body on a write that actually SUCCEEDED (see
           // the scheduler repo's INTAKE.md gotcha), so treat this as a
           // soft success rather than a hard error.
-          return { ok: true, _unverified: true };
+          return { ok: true };
         });
       })
       .then(function (res) {
         if (res.ok) {
-          statusEl.textContent = res._unverified ? 'Sent — thanks.' : 'Thanks — got it.';
+          statusEl.textContent = 'Thanks — got it.';
           document.getElementById('report-description').value = '';
         } else {
           statusEl.textContent = res.error ? 'Couldn’t save: ' + res.error : 'Something went wrong, try again.';
@@ -1630,6 +1633,7 @@ function note_(msg) {
 <script>
 // /<id> deep link (_redirects rewrites it here), legacy ?id=, or a printed label /#(ANCHOR ...).
 window.addEventListener('DOMContentLoaded', () => {
+  if (location.hash === '#report') { switchTab('report'); renderMap(); return; } // Scan's Report tab
   const m = /^#?\(?\s*([A-Za-z0-9_.\-]+)/.exec(location.hash);
   const id = decodeURIComponent(location.pathname.slice(1)) || new URLSearchParams(location.search).get('id') || (m && m[1]);
   if (id) showObject(id); else renderMap();

@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="16a404ff277e2a1793535ae6dbac58eea6a30aaa">
+  <meta name="inventory-app-ref" content="1fa499afaceed24fbafd2e5e064d20022284e281">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -473,7 +473,7 @@
 </style>
 </head>
 <body>
-<nav class="tabs"><a class="tab-btn" href="/">🗺️ Browse</a><span class="tab-btn active">📷 Scan</span></nav>
+<nav class="tabs"><a class="tab-btn" href="/">🗺️ Browse</a><span class="tab-btn active">📷 Scan</span><a class="tab-btn" href="/#report">🐞 Report</a></nav>
 <script>const BASE_URL = 'https://script.google.com/macros/s/AKfycbxBBxoknH6_85m6r6QI8fAkCH8gqpQ4PL3fOoDGzAfVMroXUoWu3zqPhi1SfgGKMCde/exec';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <section id="tab-scan" class="tab-panel active">
@@ -483,7 +483,7 @@
      instead of POSTing to a local /log file. -->
 
 <b>Scan</b> — <span id="bt-status">printer not connected</span> <button onclick="toggleBT()" id="bt-btn">Connect Printer</button>
-<p class="scan-help">Checking gear out looks just like checking it in: scan a bin (empty, newly minted, or anything), scan each item into it, then Save. Just bins and bins.</p>
+<p class="scan-help">Scan a bin, scan each thing you put in it, then press Save. Checking gear out works the same way: scan the bin it is going out in.</p>
 
 <div id="camera-wrap">
   <video id="video" autoplay playsinline muted></video>
@@ -491,14 +491,15 @@
 </div>
 
 <pre id="stack-display">—</pre>
-<div id="virtual-row" class="scan-help" hidden>Lost, broken or retired gear goes in one of these instead of a bin: <span id="virtual-btns"></span></div>
+<div id="virtual-row" class="scan-help" hidden>Putting something back on the Floor, or is it lost, broken or retired? Start with one of these instead of a bin: <span id="virtual-btns"></span></div>
 
 <input type="text" id="push-input" placeholder="type an ID and press Enter…" onkeydown="onPushKey(event)">
-<button onclick="manualClose()">Save + label</button>
+<button id="save-btn" onclick="doClose()" disabled>Save</button>
 <button onclick="undoLast()">Undo</button>
-<button onclick="clearStack()">Clear</button>
+<button onclick="clearStack()">Close without saving</button>
 <div id="save-status" class="save-status" hidden></div>
-<label><input type="checkbox" id="confirm-print" onchange="savePrefs()"> ask before printing</label>
+<label><input type="checkbox" id="use-photo"> also save what the camera sees now as its photo (only if it has none)</label>
+<label id="confirm-print-row"><input type="checkbox" id="confirm-print" onchange="savePrefs()"> ask before printing</label>
 <br><br>
 
 <b>Last saved:</b>
@@ -506,6 +507,7 @@
 <b>Label link:</b>
 <pre id="url-display">—</pre>
 <canvas id="qr-canvas"></canvas>
+<button id="share-btn" onclick="shareLabel()" hidden>Share label</button>
 
 <b>Log:</b>
 <pre id="log"></pre>
@@ -591,12 +593,12 @@ function commitToServer(scheme, photo) {
     .catch(err => 'connection: ' + err.message);
 }
 
-function saveStatus_(cls, msg) {
+function saveStatus_(cls, msg, stay) {
   const el = document.getElementById('save-status');
   el.className = 'save-status ' + cls;
   el.textContent = msg;
   el.hidden = false;
-  el.scrollIntoView({ block: 'center' });
+  if (!stay) el.scrollIntoView({ block: 'center' });
 }
 
 // The sheet's rows (ID, Label, ParentID): names for every ID, a typo shows
@@ -621,7 +623,8 @@ function loadIndex_() {
 }
 function priorFromSheet_() {
   if (!index || !index[key_(anchor)]) return false;
-  priorState = Object.values(index).filter(r => same_(r.ParentID, anchor)).map(r => String(r.ID).trim());
+  const parent = same_(anchor, 'floor') ? '' : anchor; // the Floor holds what has no ParentID
+  priorState = Object.values(index).filter(r => same_(r.ParentID, parent) && !r.Virtual).map(r => String(r.ID).trim());
   priorFrom = 'sheet';
   return true;
 }
@@ -630,6 +633,10 @@ function openAnchor_(id, labelChildren) {
   if (!priorFromSheet_()) { priorState = labelChildren; priorFrom = labelChildren.length ? 'label' : null; }
   loadIndex_(); // someone may have moved things since the page loaded
 }
+const labelOf_ = id => (index && index[key_(id)] && index[key_(id)].Label) || canon_(id);
+const leavesFloor_ = n => { const r = index && index[key_(head(n))]; return r && !r.ParentID && !r.Virtual && !same_(anchor, 'floor'); };
+// Something to save: items scanned in, or an old label's contents the sheet doesn't have.
+const pending_ = () => !!anchor && (session.length > 0 || (priorFrom === 'label' && priorState.length > 0));
 function nameOf_(node) {
   const id = canon_(head(node)), r = index && index[key_(id)];
   const inside = Array.isArray(node) && node.length > 1 ? ' (+' + (node.length - 1) + ' inside)' : '';
@@ -902,6 +909,9 @@ function renderStack() {
     b.onclick = () => pushNode(String(r.ID));
     document.getElementById('virtual-btns').appendChild(b);
   });
+  const btn = document.getElementById('save-btn');
+  btn.disabled = !pending_();
+  btn.textContent = pending_() ? 'Save: ' + (session.length || priorState.length) + ' into ' + labelOf_(anchor) : 'Save';
   if (!anchor) { el.textContent = 'Scan or type a container to start.'; return; }
   const adding = new Set(session.map(n => key_(head(n))));
   const already = priorState.filter(n => !adding.has(key_(head(n))));
@@ -909,7 +919,7 @@ function renderStack() {
   d += priorFrom === 'label' ? '\nIn it, per its printed label (sheet not reachable):\n'
                              : '\nIn it now' + (index ? ', per the sheet' : '') + ':\n';
   d += already.length ? already.map(n => '  ' + nameOf_(n)).join('\n') : '  (nothing)';
-  if (session.length) d += '\n\nAdding:\n' + session.map(n => '  + ' + nameOf_(n)).join('\n');
+  if (session.length) d += '\n\nAdding:\n' + session.map(n => '  + ' + nameOf_(n) + (leavesFloor_(n) ? '  (moves off the Floor)' : '')).join('\n');
   if (d.includes('★ NEW')) d += '\n\n★ NEW = not in the inventory yet. A typo? Press Undo.';
   d += '\n\n▸ Scan or type an item to put it in here.';
   el.textContent = d;
@@ -939,9 +949,8 @@ function onPushKey(e) {
 }
 
 function pushNode(node) {
-  // Typing the anchor again closes, same as re-scanning its label; pushing it
-  // would make the anchor its own parent and drop it off the floor map.
-  if (anchor && !Array.isArray(node) && same_(node, anchor)) { doClose(); return; }
+  if (anchor && !Array.isArray(node) && same_(node, anchor)) { alreadyOpen_(); return; }
+  if (anchor && same_(head(node), 'floor')) { log('The Floor cannot go inside anything.'); return; }
   saveHistory();
   if (!anchor) {
     openAnchor_(head(node), Array.isArray(node) ? node.slice(1) : []);
@@ -949,12 +958,17 @@ function pushNode(node) {
     session.push(node);
   }
   renderStack();
-  log('Added: ' + serialize(Array.isArray(node) ? node : [node]));
+  log('Added: ' + serialize(canonTree_(Array.isArray(node) ? node : [node])));
+}
+
+// Re-scanning or re-typing the open container never saves: only the Save button does.
+function alreadyOpen_() {
+  saveStatus_('saving', labelOf_(anchor) + ' is already open. Press Save when everything is in.', true); // the camera sees it again every 2s
 }
 
 // ── Closure ───────────────────────────────────────────────────────────────
 async function doClose() {
-  if (!anchor) { log('Nothing to save'); return; }
+  if (!pending_()) { log('Nothing to save'); return; }
 
   const ts      = ['t', Date.now().toString(36).slice(-4)];
   // The label carries everything inside; the sheet only needs what changed.
@@ -970,7 +984,10 @@ async function doClose() {
 
   saveStatus_('saving', 'Saving ' + name + '…');
   log('Saving: ' + scheme);
-  const photo = captureSnapshot_();
+  const photo = document.getElementById('use-photo').checked ? captureSnapshot_() : null;
+  document.getElementById('use-photo').checked = false;
+  const moved = (sent.slice(1).filter(n => head(n) !== 't')).map(n => labelOf_(head(n)));
+  const into  = same_(tree[0], 'floor') ? 'back on the Floor' : 'in ' + labelOf_(tree[0]);
   anchor=null; priorState=[]; priorFrom=null; session=[]; history=[];
   lastScanId=null;
   renderStack();
@@ -978,20 +995,27 @@ async function doClose() {
   const err = await commitToServer(scheme, photo);
   if (err) {
     log('NOT saved: ' + err);
-    // Put the list back so Save + label can simply be pressed again.
+    // Put the list back so Save can simply be pressed again.
     const restored = !anchor;
     if (restored) { ({ anchor, priorState, priorFrom, session } = was); renderStack(); }
     saveStatus_('err', '✗ ' + name + ' was NOT saved (' + err + '). Nothing was recorded.' +
-      (restored ? ' Your list is back above: press Save + label to try again.' : ''));
+      (restored ? ' Your list is back above: press Save to try again.' : ''));
     return;
   }
   log('Saved to sheet');
+  saveStatus_('ok', '✓ Saved at ' + new Date().toLocaleTimeString('en-US',{hour12:false}) + ': ' +
+    moved.join(', ') + (moved.length === 1 ? ' is' : ' are') + ' now ' + into + '.' +
+    (btChar || same_(tree[0], 'floor') ? '' : ' Its label is below.'));
+  loadIndex_();
   document.getElementById('closure').textContent    = pretty(tree);
+  if (same_(tree[0], 'floor')) { // the Floor gets no label
+    document.getElementById('url-display').textContent = '—';
+    document.getElementById('qr-canvas').width = 0;
+    document.getElementById('share-btn').hidden = true;
+    return;
+  }
   document.getElementById('url-display').textContent = payload;
   renderQRCanvas(payload, tree[0], tsHuman);
-  saveStatus_('ok', '✓ Saved to sheet: ' + name + ' (' + new Date().toLocaleTimeString('en-US',{hour12:false}) + ')' +
-    (btChar ? '' : '. No label printed (no printer connected); its QR code is below.'));
-  loadIndex_();
 
   const doPrint = !document.getElementById('confirm-print').checked ||
     confirm('Print label for ' + tree[0] + '?');
@@ -1001,14 +1025,12 @@ async function doClose() {
   }
 }
 
-function manualClose() { doClose(); }
-
 function clearStack() {
   saveHistory();
   anchor=null; priorState=[]; priorFrom=null; session=[];
   lastScanId=null;
   renderStack();
-  log('Cleared');
+  log('Closed without saving');
 }
 
 // ── Scanner ───────────────────────────────────────────────────────────────
@@ -1047,21 +1069,18 @@ function onScan(raw) {
     saveHistory();
     openAnchor_(scannedHead, scannedChildren);
     renderStack();
-    log('OPEN: ' + scannedHead);
+    log('OPEN: ' + canon_(scannedHead));
   } else if (same_(scannedHead, anchor)) {
-    if (session.length === 0 && priorState.length === 0) {
-      log('SKIP trivial re-scan of empty context');
-      return;
-    }
-    if (priorFrom === 'label') priorState = merge(priorState, scannedChildren);
-    doClose();
+    alreadyOpen_();
+  } else if (same_(scannedHead, 'floor')) {
+    log('The Floor cannot go inside anything.');
   } else {
     saveHistory();
     // A scanned label's own contents count only when the sheet can't be read.
     const node = scannedChildren.length > 0 && !index ? tree : scannedHead;
     session.push(node);
     renderStack();
-    log('Added: ' + serialize(Array.isArray(node)?node:[node]));
+    log('Added: ' + serialize(canonTree_(Array.isArray(node)?node:[node])));
   }
 }
 
@@ -1141,9 +1160,26 @@ function buildQRCanvas(text, labelId, tsHuman, targetCanvas) {
   return { qrSize, totalH, cell };
 }
 
+// Share label: the same canvas the Bluetooth path prints, as a PNG file, so a
+// phone without Web Bluetooth can send it to the Phomemo app or any printer.
+let labelFile = null;
 function renderQRCanvas(text, labelId, tsHuman) {
-  const info = buildQRCanvas(text, labelId, tsHuman, document.getElementById('qr-canvas'));
+  const canvas = document.getElementById('qr-canvas');
+  const info = buildQRCanvas(text, labelId, tsHuman, canvas);
   log('QR: '+info.qrSize+'px '+info.cell+'px/module');
+  labelFile = null;
+  document.getElementById('share-btn').hidden = !!btChar;
+  canvas.toBlob(b => { labelFile = new File([b], labelId + '.png', { type: 'image/png' }); }, 'image/png');
+}
+// navigator.share needs the tap's user activation, so the file is made in advance.
+function shareLabel() {
+  if (!labelFile) return;
+  if (navigator.canShare && navigator.canShare({ files: [labelFile] })) {
+    navigator.share({ files: [labelFile] }).catch(e => { if (e.name !== 'AbortError') log('Share failed: ' + e.message); });
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(labelFile); a.download = labelFile.name; a.click();
 }
 
 // ── Print ─────────────────────────────────────────────────────────────────
@@ -1234,8 +1270,9 @@ function initScan() {
   // iPhone browsers (Safari, Chrome) have no Web Bluetooth.
   if (!navigator.bluetooth) {
     document.getElementById('bt-status').textContent =
-      'printing labels is not available in this browser (iPhone browsers have no Bluetooth). Saving still works, and each label\'s QR code shows on screen.';
+      'this browser cannot reach the label printer (iPhones cannot). After saving, Share label sends the label to the Phomemo app or another printer.';
     document.getElementById('bt-btn').hidden = true;
+    document.getElementById('confirm-print-row').hidden = true;
   }
   loadPrefs();
   startCamera();
