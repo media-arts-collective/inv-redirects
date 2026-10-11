@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="1dc63ae5b7011ba3a8acaaee2557553a13692326">
+  <meta name="inventory-app-ref" content="14abde75beed04aed4e9ecc3131cb88feb77386c">
   <title>VKV Inventory</title>
 <!-- style.html -->
 <style>
@@ -752,11 +752,12 @@ function renderCrumbs() {
 
 // The open container's own details (the map's double-click is mouse-only).
 function showHere_() { selectItem_(navStack[navStack.length - 1], 'here', null); }
-function goHome() { navStack = []; hideToolbar(); renderCurrentView(); }
-function goToCrumb(i) { navStack = navStack.slice(0, i + 1); hideToolbar(); renderCurrentView(); }
+function goHome() { navStack = []; foundId = null; hideToolbar(); renderCurrentView(); }
+function goToCrumb(i) { navStack = navStack.slice(0, i + 1); foundId = null; hideToolbar(); renderCurrentView(); }
 
 function drillInto(o) {
   navStack.push(o);
+  foundId = null;
   hideToolbar();
   renderCurrentView();
 }
@@ -769,6 +770,7 @@ function drillInto(o) {
 // view_ drops a slow answer for a view the user has already left.
 let view_ = 0;
 function renderCurrentView() {
+  syncUrl_();
   renderCrumbs();
   clearMap_();
   const v = ++view_;
@@ -776,6 +778,18 @@ function renderCurrentView() {
   if (!current) { renderIsoRoot(v); return; }
   if (resolvedStyleKey_(current) === 'shelf') renderFrontShelf(current, v);
   else renderTopDown(current, v);
+}
+
+// The address bar is the share link: /<ID> of what is open (or found).
+// The first view (a typed link or a label) replaces; later taps push, so Back
+// goes back a step. Not inside Apps Script's iframe, whose address bar is not ours.
+let replaceUrl_ = true;
+function syncUrl_() {
+  if (window.top !== window || location.hash === '#report') return;
+  const id = foundId || (navStack.length ? String(navStack[navStack.length - 1].ID).trim() : '');
+  const path = '/' + (id ? encodeURIComponent(id) : '');
+  if (location.pathname + location.hash !== path) history[replaceUrl_ ? 'replaceState' : 'pushState'](null, '', path);
+  replaceUrl_ = false;
 }
 
 // ── Level 0: isometric floor (root containers) ──────────────────────────
@@ -1679,12 +1693,15 @@ function note_(msg) {
 </section>
 <script>
 // /<id> deep link (_redirects rewrites it here), legacy ?id=, or a printed label /#(ANCHOR ...).
-window.addEventListener('DOMContentLoaded', () => {
+function route_() {
   if (location.hash === '#report') { switchTab('report'); renderMap(); return; } // Scan's Report tab
   const m = /^#?\(?\s*([A-Za-z0-9_.\-]+)/.exec(location.hash);
   const id = decodeURIComponent(location.pathname.slice(1)) || new URLSearchParams(location.search).get('id') || (m && m[1]);
-  if (id) showObject(id); else renderMap();
-});
+  switchTab('browse');
+  if (id) showObject(id); else goHome();
+}
+window.addEventListener('DOMContentLoaded', route_);
+window.addEventListener('popstate', route_); // Back: browse.html's syncUrl_ pushed each step
 </script>
 </body>
 </html>

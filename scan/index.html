@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="1dc63ae5b7011ba3a8acaaee2557553a13692326">
+  <meta name="inventory-app-ref" content="14abde75beed04aed4e9ecc3131cb88feb77386c">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -478,7 +478,8 @@
      instead of POSTing to a local /log file. -->
 
 <b>Scan</b> — <span id="bt-status">printer not connected</span> <button onclick="toggleBT()" id="bt-btn">Connect Printer</button>
-<p class="scan-help">Scan a bin, scan each thing you put in it, then press Save. Checking gear out works the same way: scan the bin it is going out in.</p>
+<p class="scan-help">Scan a bin, scan each thing you put in it, then press Save. Checking gear out works the same way: scan the bin it is going out in, or start a new one with ＋ New bin.</p>
+<p id="cam-msg" class="save-status err" hidden></p>
 
 <div id="camera-wrap">
   <video id="video" autoplay playsinline muted></video>
@@ -486,6 +487,8 @@
 </div>
 
 <pre id="stack-display">—</pre>
+<div id="ask" class="scan-help" hidden><span id="ask-text"></span><br><span id="ask-btns"></span></div>
+<div id="new-row" class="scan-help" hidden>Gear going out with no bin? <button onclick="newBin_()">＋ New bin</button></div>
 <div id="virtual-row" class="scan-help" hidden>Putting something back on the Floor, or is it lost, broken or retired? Start with one of these instead of a bin: <span id="virtual-btns"></span></div>
 
 <input type="text" id="push-input" placeholder="type a name or ID and press Enter…" onkeydown="onPushKey(event)">
@@ -497,15 +500,18 @@
 <label id="confirm-print-row"><input type="checkbox" id="confirm-print" onchange="savePrefs()"> ask before printing</label>
 <br><br>
 
-<b>Last saved:</b>
-<pre id="closure">—</pre>
-<b>Label link:</b>
-<pre id="url-display">—</pre>
 <canvas id="qr-canvas"></canvas>
 <button id="share-btn" onclick="shareLabel()" hidden>Share label</button>
 
-<b>Log:</b>
-<pre id="log"></pre>
+<details style="margin-top:1rem;font-size:0.85em;color:#999;">
+  <summary style="cursor:pointer;">What the app did (for fixing problems)</summary>
+  <b>Last saved:</b>
+  <pre id="closure">—</pre>
+  <b>Label link:</b>
+  <pre id="url-display">—</pre>
+  <b>Log:</b>
+  <pre id="log"></pre>
+</details>
 
 <details style="margin-top:1rem;font-size:0.85em;color:#999;">
   <summary style="cursor:pointer;">📸 3D Pixel Cube (experimental)</summary>
@@ -598,7 +604,8 @@ function saveStatus_(cls, msg, stay) {
 
 // The sheet's rows (ID, Label, ParentID): names for every ID, a typo shows
 // up as NEW, and a container opens with what the sheet says is in it now.
-let index = null; // key_(ID) -> row
+let index = null; // key_(ID) -> first row with that ID
+let rows = [];     // every row, duplicate IDs too (hdmis-crate is HDMIs 1 and HDMIs 2)
 // Same rule as idKey_ in src/Data.gs: case and _/-/space don't matter.
 const key_ = v => String(v || '').trim().toLowerCase().replace(/[\s_-]+/g, '-');
 // A typed or scanned ID: lowercase-dash when new, the sheet's spelling when known.
@@ -608,8 +615,8 @@ const canonTree_ = n => Array.isArray(n) ? n.map(canonTree_) : canon_(n);
 const same_ = (a, b) => key_(a) === key_(b);
 function loadIndex_() {
   fetch(BASE_URL + '?scope=index').then(r => r.json())
-    .then(rows => {
-      index = {};
+    .then(got => {
+      rows = got; index = {};
       rows.forEach(r => { index[key_(r.ID)] = index[key_(r.ID)] || r; });
       if (anchor) priorFromSheet_();
       renderStack();
@@ -624,9 +631,27 @@ function priorFromSheet_() {
   return true;
 }
 function openAnchor_(id, labelChildren) {
-  anchor = id; session = [];
+  anchor = id; session = []; hideAsk_();
+  if (document.getElementById('save-status').classList.contains('saving')) document.getElementById('save-status').hidden = true;
   if (!priorFromSheet_()) { priorState = labelChildren; priorFrom = labelChildren.length ? 'label' : null; }
   loadIndex_(); // someone may have moved things since the page loaded
+}
+// Same rule as Browse's isContainer_: something is inside it, its Container
+// Style is a box kind, or it is a place on the Floor (no ParentID, no style).
+const BOX_STYLE_ = /crate|bin|box|shelf|stack|road-case/;
+function isBox_(id) {
+  const r = index && index[key_(id)];
+  if (!r) return false;
+  const style = key_(r['Container Style']);
+  return !!r.Virtual || BOX_STYLE_.test(style) || (!key_(r.ParentID) && !style) || rows.some(c => same_(c.ParentID, id));
+}
+// A new ID from a typed name: lowercase-dash, never one the sheet already has.
+function freshId_(name) {
+  const base = String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!base) return null;
+  let id = base;
+  for (let n = 2; index && index[key_(id)]; n++) id = base + '-' + n;
+  return id;
 }
 const labelOf_ = id => (index && index[key_(id)] && index[key_(id)].Label) || canon_(id);
 const leavesFloor_ = n => { const r = index && index[key_(head(n))]; return r && !r.ParentID && !r.Virtual && !same_(anchor, 'floor'); };
@@ -897,6 +922,7 @@ function renderStack() {
   const el = document.getElementById('stack-display');
   const virt = index ? Object.values(index).filter(r => r.Virtual) : [];
   document.getElementById('virtual-row').hidden = !!anchor || !virt.length;
+  document.getElementById('new-row').hidden = !!anchor;
   document.getElementById('virtual-btns').innerHTML = '';
   virt.forEach(r => {
     const b = document.createElement('button');
@@ -915,7 +941,7 @@ function renderStack() {
                              : '\nIn it now' + (index ? ', per the sheet' : '') + ':\n';
   d += already.length ? already.map(n => '  ' + nameOf_(n)).join('\n') : '  (nothing)';
   if (session.length) d += '\n\nAdding:\n' + session.map(n => '  + ' + nameOf_(n) + (leavesFloor_(n) ? '  (moves off the Floor)' : '')).join('\n');
-  if (d.includes('★ NEW')) d += '\n\n★ NEW = not in the inventory yet. A typo? Press Undo.';
+  if (d.includes('★ NEW')) d += '\n\n★ NEW = not in the inventory yet: Save adds it.';
   d += '\n\n▸ Scan or type an item to put it in here.';
   el.textContent = d;
 }
@@ -932,40 +958,92 @@ function undoLast() {
   renderStack(); log('Undo');
 }
 
+// ── Questions: a container while another is open, or a typed name ─────────
+let askedFor = null; // what the open question is about: the camera re-reads a label every 2 s
+function ask_(about, text, choices) {
+  askedFor = about;
+  document.getElementById('ask-text').textContent = text;
+  const box = document.getElementById('ask-btns');
+  box.innerHTML = '';
+  choices.forEach(([label, fn]) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.onclick = () => { hideAsk_(); fn(); };
+    box.appendChild(b);
+  });
+  document.getElementById('ask').hidden = false;
+  document.getElementById('ask').scrollIntoView({ block: 'center' });
+}
+function hideAsk_() { askedFor = null; document.getElementById('ask').hidden = true; }
+
+// A container scanned or typed while another is open: put it in, or open it instead.
+function askSwitch_(id, labelChildren) {
+  if (same_(askedFor, id) || session.some(n => same_(head(n), id))) return;
+  const name = labelOf_(id), open = labelOf_(anchor);
+  const unsaved = pending_() ? session.length || priorState.length : 0;
+  const choices = [];
+  if (!(index[key_(id)] || {}).Virtual) choices.push(['Put ' + name + ' into ' + open, () => addNode_(id)]);
+  choices.push(['Open ' + name + ' instead' + (unsaved ? ' (drops ' + unsaved + ' unsaved)' : ''), () => {
+    saveHistory(); openAnchor_(id, labelChildren); renderStack(); log('Opened ' + name);
+  }]);
+  ask_(id, name + ' is a container. ' + (choices.length > 1 ? 'Put it into ' + open + ', or open it instead?' : 'Open it instead of ' + open + '?') +
+    (unsaved ? ' Opening it drops the ' + unsaved + ' not yet saved into ' + open + ' (Undo brings them back).' : ''), choices);
+}
+
 // ── Manual push via input ─────────────────────────────────────────────────
 function onPushKey(e) {
   if (e.key !== 'Enter') return;
   const val = document.getElementById('push-input').value.trim();
   if (!val) return;
   document.getElementById('push-input').value = '';
+  hideAsk_();
   if (val.startsWith('(')) { pushNode(parse(val)); return; }
-  const id = idForTyped_(val);
-  if (id) pushNode(id);
+  lookup_(val);
 }
 
-// A typed ID, or else a name (Label) only one thing has. A name several
-// things share lists them instead of guessing. Unknown: a new ID, lowercase-dash.
-function idForTyped_(val) {
-  if (!index || index[key_(val)]) return toId_(val);
-  const hits = Object.values(index).filter(r => same_(r.Label, val));
-  if (hits.length === 1) return String(hits[0].ID).trim();
-  if (!hits.length) return toId_(val);
-  saveStatus_('err', '“' + val + '” is the name of ' + hits.length + ' things. Type the ID of the one you mean: ' +
-    hits.map(r => String(r.ID).trim() + (r.ParentID ? ' (in ' + labelOf_(r.ParentID) + ')' : ' (on the Floor)')).join(', ') + '.', true);
-  return null;
+// An exact ID, or a name only one thing has, is used straight away. Anything
+// else lists what matches (same idea as Browse's search) plus "Make new".
+function lookup_(val) {
+  if (!index || index[key_(val)]) { pushNode(toId_(val)); return; }
+  const shares = r => rows.filter(o => same_(o.ID, r.ID));
+  const exact = rows.filter(r => same_(r.Label, val));
+  if (exact.length === 1 && shares(exact[0]).length === 1) { pushNode(String(exact[0].ID).trim()); return; }
+  const hits = exact.length ? exact : rows.filter(r => key_(r.Label + ' ' + r.ID).includes(key_(val))).slice(0, 8);
+  const where = r => r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor';
+  const choices = hits.map(r => [(r.Label ? r.Label + ' · ' : '') + String(r.ID).trim() + ' (' + where(r) + ')', () => pushNode(String(r.ID).trim())]);
+  const id = freshId_(val);
+  if (!exact.length && id) choices.push(['Make new: ' + id, () => pushNode(id)]);
+  const twins = hits.map(shares).filter(s => s.length > 1)[0];
+  ask_(null, (exact.length ? (exact.length > 1 ? '“' + val + '” is the name of ' + exact.length + ' things. Which one?' : 'Found “' + val + '”.')
+                           : hits.length ? 'Nothing is called exactly “' + val + '”. Did you mean one of these?'
+                                         : 'Nothing in the inventory is called “' + val + '”.') +
+    (twins ? ' ' + twins.map(r => r.Label || r.ID).join(' and ') + ' share the ID ' + String(twins[0].ID).trim() +
+             ', so the sheet cannot tell them apart: either choice saves to that ID.' : ''), choices);
+}
+
+function newBin_() {
+  const name = prompt('Name for the new bin:');
+  if (!name) return;
+  const id = freshId_(name);
+  if (id) pushNode(id);
 }
 
 function pushNode(node) {
   if (anchor && !Array.isArray(node) && same_(node, anchor)) { alreadyOpen_(); return; }
+  if (anchor && !Array.isArray(node) && isBox_(node)) { askSwitch_(node, []); return; }
   if (anchor && same_(head(node), 'floor')) { log('The Floor cannot go inside anything.'); return; }
+  if (anchor) { addNode_(node); return; }
   saveHistory();
-  if (!anchor) {
-    openAnchor_(head(node), Array.isArray(node) ? node.slice(1) : []);
-  } else {
-    session.push(node);
-  }
+  openAnchor_(head(node), Array.isArray(node) ? node.slice(1) : []);
   renderStack();
-  log(session.length ? added_(node) : 'Opened ' + labelOf_(anchor));
+  log('Opened ' + labelOf_(anchor));
+}
+function addNode_(node) {
+  if (session.some(n => same_(head(n), head(node)))) { log(labelOf_(head(node)) + ' is already on the list'); return; }
+  saveHistory();
+  session.push(node);
+  renderStack();
+  log(added_(node));
 }
 const added_ = node => 'Added ' + labelOf_(head(node)) + ' to ' + labelOf_(anchor);
 
@@ -997,7 +1075,7 @@ async function doClose() {
   const moved = (sent.slice(1).filter(n => head(n) !== 't')).map(n => labelOf_(head(n)));
   const into  = same_(tree[0], 'floor') ? 'back on the Floor' : 'in ' + labelOf_(tree[0]);
   anchor=null; priorState=[]; priorFrom=null; session=[]; history=[];
-  lastScanId=null;
+  lastScanId=null; hideAsk_();
   renderStack();
 
   const err = await commitToServer(scheme, photo);
@@ -1034,9 +1112,12 @@ async function doClose() {
 }
 
 function clearStack() {
+  const unsaved = pending_() ? session.length || priorState.length : 0;
+  if (unsaved && !confirm('Drop the ' + unsaved + ' not yet saved into ' + labelOf_(anchor) + '?')) return;
   saveHistory();
   anchor=null; priorState=[]; priorFrom=null; session=[];
-  lastScanId=null;
+  lastScanId=null; hideAsk_();
+  document.getElementById('save-status').hidden = true;
   renderStack();
   log('Closed without saving');
 }
@@ -1080,15 +1161,13 @@ function onScan(raw) {
     log('Opened ' + labelOf_(anchor));
   } else if (same_(scannedHead, anchor)) {
     alreadyOpen_();
+  } else if (index && (scannedChildren.length > 0 || isBox_(scannedHead))) {
+    askSwitch_(scannedHead, scannedChildren);
   } else if (same_(scannedHead, 'floor')) {
     log('The Floor cannot go inside anything.');
   } else {
-    saveHistory();
     // A scanned label's own contents count only when the sheet can't be read.
-    const node = scannedChildren.length > 0 && !index ? tree : scannedHead;
-    session.push(node);
-    renderStack();
-    log(added_(node));
+    addNode_(scannedChildren.length > 0 && !index ? tree : scannedHead);
   }
 }
 
@@ -1099,7 +1178,12 @@ async function startCamera() {
     });
     document.getElementById('video').srcObject = stream;
     log('Camera ready'); startScanning();
-  } catch(e) { log('Camera error: '+e.message); }
+  } catch(e) {
+    log('Camera error: '+e.message);
+    const m = document.getElementById('cam-msg');
+    m.textContent = 'The camera is off (' + e.message + '). You can still type names below. To turn it on, on an iPhone: tap aA in the address bar › Website Settings › Camera › Allow, then reload this page.';
+    m.hidden = false;
+  }
 }
 
 function startScanning() {
