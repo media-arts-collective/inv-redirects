@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="7f9c5bd520c4d0226476aa6a8da8a3d6c3b13f54">
+  <meta name="inventory-app-ref" content="b63c7c510e0122bc28e276b578be219e37f9cd9e">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -73,7 +73,7 @@
   /* ── Isometric map ────────────────────────────────────────────────────── */
   .map-wrapper {
     display: flex;
-    justify-content: safe center; /* overflow scrolls from the left edge instead of clipping it (issue #6) */
+    justify-content: center;
     overflow: hidden; /* was overflow-x:auto -- content now scales to fit the
       viewport instead of scrolling, see fitMapToViewport_() in browse.html */
     padding: 2rem 0;
@@ -85,7 +85,10 @@
      vs renderIsoRoot (removed) -- without it, content past the wrapper's
      edge under plain overflow:hidden was simply invisible, unscrollable,
      with no way to reach it. */
-  .map-wrapper--scroll { overflow-x: auto; }
+  /* safe: an overflowing flat view scrolls from its left edge instead of
+     clipping it (issue #6). Not on the iso root, whose 1400px box is
+     scale()d around its center and needs plain centering. */
+  .map-wrapper--scroll { overflow-x: auto; justify-content: safe center; }
   .map-container {
     position: relative;
     /* width/height/--origin-left/--origin-bottom are all set in JS
