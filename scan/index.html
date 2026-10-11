@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="a31890f94ac9a7e32790404ebfa02b0c3697e697">
+  <meta name="inventory-app-ref" content="4ef3fe44eb6213894adcc2f1129d2f77ceb2392f">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -1077,6 +1077,7 @@ function onPushKey(e) {
 // An exact ID, or a name only one thing has, is used straight away. Anything
 // else lists what matches (search_, html/match.html, shared with Browse) plus "Make new".
 function lookup_(val) {
+  if (anchor && (same_(val, anchor) || same_(val, names_[key_(anchor)]))) { alreadyOpen_(); return; }
   if (!index || index[key_(val)]) { pushNode(toId_(val)); return; }
   const shares = r => rows.filter(o => same_(o.ID, r.ID));
   const exact = rows.filter(r => same_(r.Label, val));
@@ -1085,7 +1086,7 @@ function lookup_(val) {
   const where = r => r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor';
   const choices = hits.map(r => [(r.Label ? r.Label + ' · ' : '') + String(r.ID).trim() + ' (' + where(r) + ')', () => pushNode(String(r.ID).trim())]);
   const id = freshId_(val);
-  if (!exact.length && id) choices.push(['Make new: ' + id, () => { names_[key_(id)] = val; pushNode(id); }]);
+  if (!exact.length && id) choices.push(['Make new: ' + id, () => { names_[key_(id)] = val; anchor ? pushNode(id) : askBin_(id); }]);
   const twins = hits.map(shares).filter(s => s.length > 1)[0];
   ask_(null, (exact.length ? (exact.length > 1 ? '“' + val + '” is the name of ' + exact.length + ' things. Which one?' : 'Found “' + val + '”.')
                            : hits.length ? 'Nothing is called exactly “' + val + '”. Did you mean one of these?'
@@ -1131,10 +1132,11 @@ function remember_(id) {
 }
 function askBin_(id) {
   if (same_(askedFor, id)) return; // the camera re-reads a label every 2 s
-  const r = index[key_(id)], name = labelOf_(id);
+  const r = (index && index[key_(id)]) || { ID: id, ParentID: '' }, name = labelOf_(id);
+  const isNew = !(index && index[key_(id)]);
   carry = String(r.ID).trim();
   const bins = [...recent_(), r.ParentID].filter((b, i, a) => b && isBox_(b) && a.findIndex(x => same_(x, b)) === i).slice(0, 4);
-  ask_(id, name + ' is ' + (r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor') + '. Scan or pick the bin it is going into first.',
+  ask_(id, (isNew ? 'Where is ' + name + ' going?' : name + ' is ' + (r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor') + '.') + ' Scan or pick its bin.',
     [...bins.map(b => [labelOf_(b), () => open_(canon_(b), [])]),
      ['＋ New bin', newBin_],
      ['Use ' + name + ' as a bin', () => { carry = null; open_(String(r.ID).trim(), []); }]]);
