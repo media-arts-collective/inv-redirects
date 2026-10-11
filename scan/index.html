@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="55a1a578d865e42f31b7433105527fb984765e95">
+  <meta name="inventory-app-ref" content="910410045460fe9ae13d66a60f3aa628cea8ee48">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -430,7 +430,6 @@
 
   /* ── Scan tab (ported from ScanScript) ───────────────────────────────── */
   #tab-scan { font-family: monospace; }
-  #tab-scan #stack-display { border: 0; background: none; padding: 4px 0; min-height: 0; color: #ccc; font-family: sans-serif; font-size: 15px; }
   #tab-scan .starts, #tab-scan .scan-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
   #tab-scan .starts button { margin: 0; }
   #tab-scan label { display: block; font-family: sans-serif; font-size: 14px; margin: 6px 0; }
@@ -550,7 +549,7 @@ function search_(rows, q, limit) {
 <input type="text" id="push-input" placeholder="Type a name or ID" enterkeyhint="go" onkeydown="onPushKey(event)">
 <div id="ask" class="scan-help" hidden><span id="ask-text"></span><br><span id="ask-btns"></span></div>
 <pre id="stack-display">—</pre>
-<div class="starts"><span id="new-row" hidden><button onclick="newBin_()">＋ New bin</button></span><span id="virtual-row" hidden><span id="virtual-btns"></span></span></div>
+<div class="starts"><span id="new-row" hidden><button onclick="newBin_()">＋ New bin</button></span></div>
 
 <div class="scan-actions">
 <button id="save-btn" onclick="doClose()" disabled>Save</button>
@@ -720,7 +719,7 @@ function from_(n) {
   return '  (from ' + (r.ParentID ? labelOf_(r.ParentID) : 'the Floor') + ')';
 }
 // Something to save: items scanned in, or an old label's contents the sheet doesn't have.
-const pending_ = () => !!anchor && (session.length > 0 || (priorFrom === 'label' && priorState.length > 0));
+const pending_ = () => !!anchor && (session.length > 0 || (priorFrom === 'label' && priorState.length > 0) || !(index && index[key_(anchor)]));
 function nameOf_(node) {
   const id = canon_(head(node)), r = index && index[key_(id)];
   const inside = Array.isArray(node) && node.length > 1 ? ' (+' + (node.length - 1) + ' inside)' : '';
@@ -986,34 +985,14 @@ function merge(prior, sess) {
 // ── Stack display ─────────────────────────────────────────────────────────
 function renderStack() {
   const el = document.getElementById('stack-display');
-  const virt = index ? Object.values(index).filter(r => r.Virtual) : [];
-  document.getElementById('virtual-row').hidden = !!anchor || !virt.length;
   document.getElementById('new-row').hidden = !!anchor;
-  document.getElementById('virtual-btns').innerHTML = '';
-  virt.forEach(r => {
-    const b = document.createElement('button');
-    b.textContent = r.Label || r.ID;
-    b.onclick = () => pushNode(String(r.ID));
-    document.getElementById('virtual-btns').appendChild(b);
-  });
   const btn = document.getElementById('save-btn');
   btn.disabled = !pending_();
-  btn.textContent = pending_() ? 'Save: ' + (session.length || priorState.length) + ' into ' + labelOf_(anchor) : 'Save';
-  if (!anchor) { el.textContent = 'Scan or type a bin to start.'; return; }
-  const adding = new Set(session.map(n => key_(head(n))));
-  const already = priorState.filter(n => !adding.has(key_(head(n))));
-  const wasOpen = !!el.querySelector('details[open]');
-  const esc = v => String(v).replace(/[&<>]/g, c => '&#' + c.charCodeAt(0) + ';');
-  let d = 'Container: ' + esc(nameOf_(anchor)) + '\n';
-  if (session.length) d += '\nAdding:\n' + session.map(n => '  + ' + esc(nameOf_(n) + from_(n))).join('\n') + '\n';
-  const list = already.map(n => '  ' + esc(nameOf_(n))).join('\n');
-  const where = priorFrom === 'label' ? ', per its printed label (the inventory could not be reached)' : '';
-  d += '\n' + (!already.length ? 'Already inside' + where + ': nothing'
-    : already.length > 5 ? '<details' + (wasOpen ? ' open' : '') + '><summary>' + already.length + ' already inside' + where + ' — show</summary>' + list + '</details>'
-    : 'Already inside' + where + ':\n' + list);
-  if (d.includes('★ NEW')) d += '\n\n★ NEW = not in the inventory yet: Save adds it.';
-  d += '\n\n▸ Scan or type an item to put it in here.';
-  el.innerHTML = d.replace('</details>\n', '</details>'); // a block already ends its line
+  btn.textContent = !pending_() ? 'Save' : session.length ? 'Save: ' + session.length + ' into ' + labelOf_(anchor) : 'Save ' + labelOf_(anchor);
+  if (!anchor) { el.textContent = '—'; return; }
+  const tree = [anchor, ...merge(priorState, session)];
+  const fresh = [...new Set(tree.flat(Infinity).map(String))].filter(id => index && !index[key_(id)]);
+  el.textContent = pretty(tree) + (fresh.length ? '\n\n★ NEW: ' + fresh.join(', ') : '');
 }
 
 // ── Undo ──────────────────────────────────────────────────────────────────
@@ -1141,7 +1120,7 @@ function askBin_(id) {
   ask_(id, (isNew ? 'Where is ' + name + ' going?' : name + ' is ' + (r.ParentID ? 'in ' + labelOf_(r.ParentID) : 'on the Floor') + '.') + ' Scan or pick its bin.',
     [...bins.map(b => [labelOf_(b), () => open_(canon_(b), [])]),
      ['＋ New bin', newBin_],
-     ['Use ' + name + ' as a bin', () => { carry = null; open_(String(r.ID).trim(), []); }]]);
+     [isNew ? 'Just ' + name + ' (Save prints its label)' : 'Use ' + name + ' as a bin', () => { carry = null; open_(String(r.ID).trim(), []); }]]);
 }
 function addNode_(node) {
   if (session.some(n => same_(head(n), head(node)))) { log(labelOf_(head(node)) + ' is already on the list'); return; }
