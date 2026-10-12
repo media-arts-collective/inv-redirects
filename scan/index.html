@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="inventory-app-ref" content="bb0293fd1a498869ca2fb46ae12d75efd094a1bc">
+  <meta name="inventory-app-ref" content="f4ee77043097c93c9fcf27ad34a879ca1f1d5929">
   <title>VKV Scan</title>
 <!-- style.html -->
 <style>
@@ -1235,8 +1235,20 @@ function isScanScriptQR(raw) {
 
 function extractPayload(raw) {
   let str = raw.trim();
-  if (str.includes('#')) str = str.split('#').slice(1).join('#');
+  if (str.includes('#')) return str.split('#').slice(1).join('#');
+  // A Browse link or an older label: https://inv.kreweofvaporwave.com/<id or name slug> (or ?id=)
+  try {
+    const u = new URL(str);
+    if (u.host === URL_HOST) return decodeURIComponent(u.searchParams.get('id') || u.pathname.replace(/^\/+|\/+$/g, '')) || str;
+  } catch (_) {}
   return str;
+}
+// Older labels carry a slug of the name ("rcas" for "RCAs"), not the ID: use
+// the one row that has that name, else keep what was scanned.
+function known_(id) {
+  if (!index || index[key_(id)]) return id;
+  const named = rows.filter(r => same_(r.Label, id));
+  return named.length === 1 ? String(named[0].ID).trim() : id;
 }
 
 function onScan(raw) {
@@ -1246,7 +1258,7 @@ function onScan(raw) {
   const tree = parse(str);
   if (!tree||tree.length===0) { log('Parse failed'); return; }
 
-  const scannedHead     = Array.isArray(tree[0]) ? tree[0][0] : tree[0];
+  const scannedHead     = known_(Array.isArray(tree[0]) ? tree[0][0] : tree[0]);
   const scannedChildren = tree.slice(1);
 
   if (same_(scannedHead, lastScanId) && session.length === 0 && priorState.length === 0) {
@@ -1261,7 +1273,7 @@ function onScan(raw) {
     start_(scannedHead, scannedChildren);
   } else if (same_(scannedHead, anchor)) {
     alreadyOpen_();
-  } else if (index && (scannedChildren.length > 0 || isBox_(scannedHead))) {
+  } else if (index && (scannedChildren.length > 0 || isBox_(scannedHead)) && !isPlace_(anchor)) {
     askSwitch_(scannedHead, scannedChildren);
   } else if (same_(scannedHead, 'floor')) {
     log('The Floor cannot go inside anything.');
